@@ -191,6 +191,7 @@ namespace robot_controller
             robot->qMin[i] = this->controllerCommandBUff->qMin[i];
             robot->dqLimit[i] = this->controllerCommandBUff->dqLimit[i];
             robot->ddqLimit[i] = this->controllerCommandBUff->ddqLimit[i];
+            robot->dddqLimit[i] = this->controllerCommandBUff->dddqLimit[i];
         }
         this->nowStopTaskNum = this->controllerCommandBUff->stopTaskNum;
         this->nowPlanTaskNum = this->controllerCommandBUff->planTaskNum;
@@ -294,6 +295,7 @@ namespace robot_controller
         }
         if (this->newStop && this->nowControllerStatus == RunStatus::run_) // 急停规划
         {
+            
         }
         this->newPlan = false;
         this->newStop = false;
@@ -301,7 +303,6 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calDesireNext(my_robot::Robot<_Dofs> *robot)
     {
-
         for (int i = 0; i < _Dofs; i++)
         {
             switch (this->nowControllerStatus)

@@ -2,7 +2,7 @@
 #include <queue>
 #include <Eigen/Core>
 #include <Eigen/Dense>
-
+// 五次多项式规划：计算时间
 template <int _Dofs>
 void calQuinticPlanTime(bool isCoordinated, double *maxVel, double *maxAcc, double *T,
                         const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf)
@@ -24,13 +24,13 @@ void calQuinticPlanTime(bool isCoordinated, double *maxVel, double *maxAcc, doub
         }
     }
 }
-
-// isCoordinated为false未测试
+// 五次多项式规划：计算队列
 template <int _Dofs>
 void calQuinticPlan(bool isCoordinated, double deltaT, double *maxVel, double *maxAcc,
                     const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf,
                     std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
+    // isCoordinated为false未测试
     double T[_Dofs] = {0.0};
     double dq0[_Dofs] = {0.0};
     double ddq0[_Dofs] = {0.0};
@@ -63,6 +63,7 @@ void calQuinticPlan(bool isCoordinated, double deltaT, double *maxVel, double *m
         }
     }
 }
+// 急停规划：计算时间
 template <int _Dofs>
 double calStopPlanTime(const Eigen::Matrix<double, _Dofs, 1> &ddq, double dddq)
 {
@@ -76,11 +77,13 @@ double calStopPlanTime(const Eigen::Matrix<double, _Dofs, 1> &ddq, double dddq)
     }
     return Tmax;
 }
+// 急停规划：计算队列
 template <int _Dofs>
 void calStopPlan(double deltaT, double dddq, const Eigen::Matrix<double, _Dofs, 1> &ddq,
                  std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
     double stopT = calStopPlanTime(ddq, dddq);
+    
 }
 // template <int _Dofs, typename pubDataType, typename dynParamType>
 // void Controller<_Dofs, pubDataType, dynParamType>::calStopQueue(my_robot::Robot<_Dofs> *robot)

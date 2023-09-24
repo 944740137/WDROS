@@ -54,6 +54,7 @@ namespace my_robot
         double qMin[7] = {-2.7437, -1.7837, -2.9007, -3.0421, -2.8065, 0.5445, -3.0159};
         double dqLimit[7] = {2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100};
         double ddqLimit[7] = {15, 7.5, 10, 12.5, 15, 10, 10};
+        double dddqLimit[7] = {7500, 3750, 5000, 6250, 7500, 10000, 10000};
 
         Robot(const Robot &) = delete;
         void operator=(const Robot &) = delete;
