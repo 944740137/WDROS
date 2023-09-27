@@ -53,8 +53,8 @@ namespace my_robot
         double qMax[7] = {2.7437, 1.7837, 2.9007, -0.1518, 2.8065, 4.5169, 3.0159};
         double qMin[7] = {-2.7437, -1.7837, -2.9007, -3.0421, -2.8065, 0.5445, -3.0159};
         double dqLimit[7] = {2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100};
-        double ddqLimit[7] = {15, 7.5, 10, 12.5, 15, 10, 10};
-        double dddqLimit[7] = {7500, 3750, 5000, 6250, 7500, 10000, 10000};
+        double ddqLimit[7] = {15, 7.5, 10, 12.5, 15, 20, 20};
+        double dddqLimit[7] = {1500, 750, 1000, 1250, 1500, 2000, 2000};
 
         Robot(const Robot &) = delete;
         void operator=(const Robot &) = delete;
@@ -69,6 +69,7 @@ namespace my_robot
         const double *const getqMin() const;
         const double *const getdqLimit() const;
         const double *const getddqLimit() const;
+        const double *const getdddqLimit() const;
 
         // get kinematics
         const Eigen::Matrix<double, _Dofs, 1> &getq0();
@@ -163,6 +164,11 @@ namespace my_robot
     const double *const Robot<_Dofs>::getddqLimit() const
     {
         return this->ddqLimit;
+    }
+    template <int _Dofs>
+    const double *const Robot<_Dofs>::getdddqLimit() const
+    {
+        return this->dddqLimit;
     }
     // 初值设置和获取
     template <int _Dofs>

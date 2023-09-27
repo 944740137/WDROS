@@ -1,5 +1,6 @@
 #include <cmath>
 #include <queue>
+#include <iostream>
 #include <Eigen/Core>
 #include <Eigen/Dense>
 // 五次多项式规划：计算时间
@@ -28,7 +29,8 @@ void calQuinticPlanTime(bool isCoordinated, double *maxVel, double *maxAcc, doub
 template <int _Dofs>
 void calQuinticPlan(bool isCoordinated, double deltaT, double *maxVel, double *maxAcc,
                     const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf,
-                    std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+                    std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d,
+                    std::vector<std::queue<double>> &ddq_d)
 {
     // isCoordinated为false未测试
     double T[_Dofs] = {0.0};
@@ -63,38 +65,159 @@ void calQuinticPlan(bool isCoordinated, double deltaT, double *maxVel, double *m
         }
     }
 }
-// 急停规划：计算时间
+
+// 急停规划：最短时间规划
 template <int _Dofs>
-double calStopPlanTime(const Eigen::Matrix<double, _Dofs, 1> &ddq, double dddq)
+bool calStopPlanParam(double deltaT, double jerk, double dq0, double ddq0,
+                      double &jerk1, double &jerk2, double &maxAcc, double &planTime)
 {
-    double Tmax = 0.0;
-    for (int i = 0; i < _Dofs; i++)
+    double S = -dq0;
+    double S1, S2, S3;
+    if (S < 0)
+        maxAcc = -maxAcc;
+
+    if (ddq0 <= maxAcc)
+        jerk1 = jerk;
+    else
+        jerk1 = -jerk;
+    if (0 <= maxAcc)
+        jerk2 = -jerk;
+    else
+        jerk2 = jerk;
+
+    if ((maxAcc * ddq0 > 0) && std::fabs(S) <= (std::fabs(ddq0 * ddq0) / (2 * jerk1)))
     {
-        double error = std::fabs(ddq[i]);
-        double T = error / dddq;
-        if (i == 0 || T > Tmax)
-            Tmax = T;
+        return false;
     }
-    return Tmax;
+
+    if (std::fabs((maxAcc * maxAcc - ddq0 * ddq0) / (2 * jerk1) + (0 - maxAcc * maxAcc) / (2 * jerk2)) < (std::fabs(S)))
+    {
+        S1 = (maxAcc * maxAcc - ddq0 * ddq0) / (2 * jerk1);
+        S3 = (0 - maxAcc * maxAcc) / (2 * (jerk2));
+        S2 = S - (S1 + S3);
+    }
+    else
+    {
+        maxAcc = sqrt((2 * jerk1 * S + ddq0 * ddq0) / 2);
+        if (S < 0)
+            maxAcc = -maxAcc;
+        S1 = (maxAcc * maxAcc - ddq0 * ddq0) / (2 * jerk1);
+        S3 = (0 - maxAcc * maxAcc) / (2 * (jerk2));
+        S2 = 0;
+    }
+
+    double T1 = std::fabs((maxAcc - ddq0) / (jerk1));
+    double T2 = std::fabs(S2 / maxAcc);
+    double T3 = std::fabs((0 - maxAcc) / (jerk2));
+
+    planTime = T1 + T2 + T3;
+    return true;
+}
+// 急停规划：固定时间规划
+template <int _Dofs>
+void calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double maxPlanTime,
+                      double jerk1, double jerk2, double maxAcc,
+                      std::queue<double> &q_d, std::queue<double> &dq_d, std::queue<double> &ddq_d)
+{
+    double S = -dq0;
+    if (ddq0 * maxAcc > 0 && std::fabs(maxAcc) > std::fabs(ddq0)) // 确定jerk1的符号
+    {
+        double T = std::fabs(ddq0 / jerk1) + std::fabs((S - ((-ddq0 * ddq0) / (2 * jerk2))) / ddq0);
+        if (maxPlanTime <= T)
+        {
+            jerk1 = jerk1;
+        }
+        else
+        {
+            jerk1 = -jerk1;
+        }
+    }
+    double A = jerk1 - jerk2;
+    double B = (2 * jerk1 * jerk2 * maxPlanTime + 2 * jerk2 * ddq0);
+    double C = -2 * jerk1 * jerk2 * S - jerk2 * ddq0 * ddq0;
+    double Acc;
+    if (A == 0)
+    {
+        Acc = -C / B;
+    }
+    else
+    {
+        Acc = (-B - std::sqrt(B * B - 4 * A * C)) / (2 * A);
+    }
+
+    double S1 = (Acc * Acc - ddq0 * ddq0) / (2 * jerk1);
+    double S3 = (0 - Acc * Acc) / (2 * jerk2);
+    double S2 = S - (S1 + S3);
+
+    double T1 = std::fabs((Acc - ddq0) / jerk1);
+    double T2 = std::fabs(S2 / Acc);
+    double T3 = std::fabs((0 - Acc) / jerk2);
+    double q = q0;
+    int totalNum = std::ceil((T1 + T2 + T3) / deltaT);
+    for (int num = 0; num <= totalNum; ++num)
+    {
+        double t = num * deltaT;
+        double detladq;
+        double detladdq;
+        if (t >= 0 && t < T1)
+        {
+            double nowt = t;
+            detladdq = jerk1 * nowt;
+            detladq = ddq0 * nowt + 0.5 * jerk1 * nowt * nowt;
+            q = q + (dq0 + detladq) * deltaT;
+            q_d.push(q);
+            dq_d.push(dq0 + detladq);
+            ddq_d.push(ddq0 + detladdq);
+        }
+        else if (t >= T1 && t < (T1 + T2))
+        {
+            double nowt = t - T1;
+            detladq = S1 + nowt * Acc;
+            q = q + (dq0 + detladq) * deltaT;
+            q_d.push(q);
+            dq_d.push(dq0 + detladq);
+            ddq_d.push(Acc);
+        }
+        else if (t >= (T1 + T2) && t < (T1 + T2 + T3))
+        {
+            double nowt = t - T1 - T2;
+            detladdq = jerk2 * nowt;
+            detladq = S1 + S2 + Acc * nowt + 0.5 * jerk2 * nowt * nowt;
+            q = q + (dq0 + detladq) * deltaT;
+            q_d.push(q);
+            dq_d.push(dq0 + detladq);
+            ddq_d.push(Acc + detladdq);
+        }
+        else if (num == totalNum)
+        {
+            q_d.push(q);
+            dq_d.push(0.0);
+            ddq_d.push(0.0);
+        }
+    }
 }
 // 急停规划：计算队列
 template <int _Dofs>
-void calStopPlan(double deltaT, double dddq, const Eigen::Matrix<double, _Dofs, 1> &ddq,
+bool calStopPlan(bool isCoordinated, double deltaT, double *dddq, double *ddq,
+                 double *q0, double *dq0, double *ddq0,
                  std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
-    double stopT = calStopPlanTime(ddq, dddq);
-    
+    double jerk1[_Dofs] = {0.0};
+    double jerk2[_Dofs] = {0.0};
+    double maxAcc[_Dofs] = {0.0};
+    double planTime = 0;
+    double maxPlanTime = 0;
+    for (int i = 0; i < _Dofs; i++)
+    {
+        maxAcc[i] = ddq[i];
+        if (!calStopPlanParam<_Dofs>(deltaT, dddq[i], dq0[i], ddq0[i], jerk1[i], jerk2[i], maxAcc[i], planTime))
+            return false;
+        if (i == 0 || maxPlanTime < planTime)
+            maxPlanTime = planTime;
+    }
+    for (int i = 0; i < _Dofs; i++)
+    {
+        calStopPlanQueue<_Dofs>(deltaT, q0[i], dq0[i], ddq0[i], maxPlanTime, jerk1[i], jerk2[i], maxAcc[i], q_d[i], dq_d[i], ddq_d[i]);
+    }
+    return true;
 }
-// template <int _Dofs, typename pubDataType, typename dynParamType>
-// void Controller<_Dofs, pubDataType, dynParamType>::calStopQueue(my_robot::Robot<_Dofs> *robot)
-// {
-//     std::queue<double> empty;
-
-//     // 清空运行队列
-//     for (int i = 0; i < _Dofs; i++)
-//     {
-//         swap(empty, q_dQueue[i]);
-//         swap(empty, dq_dQueue[i]);
-//         swap(empty, ddq_dQueue[i]);
-//     }
-// }
