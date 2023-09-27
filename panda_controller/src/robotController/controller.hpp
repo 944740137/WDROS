@@ -8,26 +8,6 @@
 
 namespace robot_controller
 {
-    auto setDesiredValues = [](double &q_d, double &dq_d, double &ddq_d,
-                               std::queue<double> &qQueue, std::queue<double> &dqQueue, std::queue<double> &ddqQueue)
-    {
-        q_d = qQueue.front();
-        dq_d = dqQueue.front();
-        ddq_d = ddqQueue.front();
-        qQueue.pop();
-        dqQueue.pop();
-        ddqQueue.pop();
-    };
-    auto checkIsEmpty = [](std::queue<double> &qQueue, double &q_hold, double &q_d, int dof, int maxDof, RunStatus &status)
-    {
-        if (qQueue.empty())
-        {
-            q_hold = q_d;
-            if (dof == maxDof)
-                status = RunStatus::wait_;
-        }
-    };
-
     // _Dofs自由度机器人控制器
     template <int _Dofs, typename pubDataType>
     class Controller
@@ -97,6 +77,12 @@ namespace robot_controller
         const std::string &getControllerLawName();
         void dynamicSetParameter();
         void changeControllerLaw(ControllerLawType type);
+        void initParamFromMaster(my_robot::Robot<_Dofs> *robot);
+        void initParamToMaster();
+        void calRunQueue(my_robot::Robot<_Dofs> *robot);
+        void calStopQueue(my_robot::Robot<_Dofs> *robot);
+        void startMotion();
+        void clearRunQueue();
 
         // init
         void init(int recordPeriod, my_robot::Robot<_Dofs> *robot);
@@ -151,7 +137,75 @@ namespace robot_controller
         if (controllerLaw.get() != nullptr)
             controllerLaw->dynamicSetParameter(this->controllerParam, this->time);
     }
-
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::initParamToMaster()
+    {
+        this->controllerStateBUff->robotDof = _Dofs;
+        this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::initParamFromMaster(my_robot::Robot<_Dofs> *robot)
+    {
+        for (int i = 0; i < _Dofs; i++)
+        {
+            robot->qMax[i] = this->controllerCommandBUff->qMax[i];
+            robot->qMin[i] = this->controllerCommandBUff->qMin[i];
+            robot->dqLimit[i] = this->controllerCommandBUff->dqLimit[i];
+            robot->ddqLimit[i] = this->controllerCommandBUff->ddqLimit[i];
+            robot->dddqLimit[i] = this->controllerCommandBUff->dddqLimit[i];
+            printf("%f %f %f %f %f\n", robot->qMax[i], robot->qMin[i], robot->dqLimit[i], robot->ddqLimit[i], robot->dddqLimit[i]);
+        }
+        this->nowStopTaskNum = this->controllerCommandBUff->stopTaskNum;
+        this->nowPlanTaskNum = this->controllerCommandBUff->planTaskNum;
+        this->jogSpeed = this->controllerCommandBUff->jogSpeed_d;
+        this->jogSpeed_d = this->controllerCommandBUff->jogSpeed_d;
+        this->runSpeed = this->controllerCommandBUff->runSpeed_d;
+        this->runSpeed_d = this->controllerCommandBUff->runSpeed_d;
+        this->controllerLawType = this->controllerCommandBUff->controllerLawType_d;
+        this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::startMotion()
+    {
+        this->nowControllerStatus = RunStatus::run_; // 开始运动
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::calRunQueue(my_robot::Robot<_Dofs> *robot)
+    {
+        double velLimit[_Dofs] = {0.0};
+        double accLimit[_Dofs] = {0.0};
+        for (int i = 0; i < _Dofs; i++)
+        {
+            velLimit[i] = this->runSpeed * robot->getdqLimit()[i];
+            accLimit[i] = robot->getddqLimit()[i];
+        }
+        calQuinticPlan(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        this->startMotion();
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::calStopQueue(my_robot::Robot<_Dofs> *robot)
+    {
+        double maxJerk[_Dofs] = {0.0};
+        double maxAcc[_Dofs] = {0.0};
+        double q[_Dofs] = {0.0};
+        double dq[_Dofs] = {0.0};
+        double ddq[_Dofs] = {0.0};
+        for (int i = 0; i < _Dofs; i++)
+        {
+            std::queue<double> empty[3];
+            maxJerk[i] = robot->getdddqLimit()[i];
+            maxAcc[i] = robot->getddqLimit()[i];
+            q[i] = this->q_dQueue[i].front();
+            dq[i] = this->dq_dQueue[i].front();
+            ddq[i] = this->ddq_dQueue[i].front();
+            swap(empty[0], q_dQueue[i]);
+            swap(empty[1], dq_dQueue[i]);
+            swap(empty[2], ddq_dQueue[i]);
+        }
+        calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, q_dQueue, dq_dQueue, ddq_dQueue);
+    }
+    
     // init
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::init(int recordPeriod, my_robot::Robot<_Dofs> *robot)
@@ -159,6 +213,8 @@ namespace robot_controller
         // 设置数据记录周期
         setRecord(this->recordPeriod);
         this->q_hold = robot->getq();
+
+        // tmp
         for (int i = 0; i < _Dofs; i++)
         {
             controllerParam.jointParam1[i].value = 50;
@@ -177,28 +233,9 @@ namespace robot_controller
             printf("通信模型建立成功\n");
         }
 
-        // send
-        this->controllerStateBUff->robotDof = _Dofs;
-        this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
-
         // read
-        for (int i = 0; i < _Dofs; i++)
-        {
-            // robot->qMax[i] = this->controllerCommandBUff->qMax[i];
-            // robot->qMin[i] = this->controllerCommandBUff->qMin[i];
-            // robot->dqLimit[i] = this->controllerCommandBUff->dqLimit[i];
-            // robot->ddqLimit[i] = this->controllerCommandBUff->ddqLimit[i];
-            // robot->dddqLimit[i] = this->controllerCommandBUff->dddqLimit[i];
-        }
-        this->nowStopTaskNum = this->controllerCommandBUff->stopTaskNum;
-        this->nowPlanTaskNum = this->controllerCommandBUff->planTaskNum;
-        this->jogSpeed = this->controllerCommandBUff->jogSpeed_d;
-        this->jogSpeed_d = this->controllerCommandBUff->jogSpeed_d;
-        this->runSpeed = this->controllerCommandBUff->runSpeed_d;
-        this->runSpeed_d = this->controllerCommandBUff->runSpeed_d;
-        this->controllerLawType = this->controllerCommandBUff->controllerLawType_d;
-        this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
-
+        this->initParamToMaster();
+        this->initParamFromMaster(robot);
         changeControllerLaw(this->controllerLawType);
     }
 
@@ -217,19 +254,19 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::communication(my_robot::Robot<_Dofs> *robot)
     {
+        if (!this->connectStatus && this->communicationModel.comSendMessage())
+        {
+            this->initParamFromMaster(robot);
+        }
         this->connectStatus = this->communicationModel.comSendMessage();
 
         if (!this->connectStatus)
             return;
+        std::copy(this->controllerLaw->q_d.data(), this->controllerLaw->q_d.data() + _Dofs, this->robotDataBuff->q_d);
+        std::copy(robot->getq().data(), robot->getq().data() + _Dofs, this->robotDataBuff->q);
+        std::copy(robot->getdq().data(), robot->getdq().data() + _Dofs, this->robotDataBuff->dq);
+        std::copy(robot->getTorque().data(), robot->getTorque().data() + _Dofs, this->robotDataBuff->tau);
 
-        // send
-        for (int i = 0; i < _Dofs; i++)
-        {
-            this->robotDataBuff->q_d[i] = this->controllerLaw->q_d[i];
-            this->robotDataBuff->q[i] = robot->getq()[i];
-            this->robotDataBuff->dq[i] = robot->getdq()[i];
-            this->robotDataBuff->tau[i] = robot->getTorque()[i];
-        }
         for (int i = 0; i < 3; i++)
         {
             this->robotDataBuff->position[i] = robot->getdOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
@@ -238,20 +275,16 @@ namespace robot_controller
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
 
         // read
-        this->jogSign = this->controllerCommandBUff->jogSign;
         this->jogSpeed_d = this->controllerCommandBUff->jogSpeed_d;
         this->runSpeed_d = this->controllerCommandBUff->runSpeed_d;
         this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
+
+        this->jogSign = this->controllerCommandBUff->jogSign;
+
         if (this->nowPlanTaskNum != this->controllerCommandBUff->planTaskNum) // 新的规划任务
         {
             this->plannerTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
-            for (int i = 0; i < _Dofs; i++)
-            {
-                this->q_calQueue[i] = this->controllerCommandBUff->q_final[i]; // 最终目标位置
-            }
-            for (int i = 0; i < 3; i++)
-            {
-            }
+            this->q_calQueue = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->q_final, _Dofs, 1);
             this->newPlan = true;
             this->nowPlanTaskNum = this->controllerCommandBUff->planTaskNum;
         }
@@ -285,37 +318,11 @@ namespace robot_controller
         }
         if (this->newPlan && this->nowControllerStatus == RunStatus::wait_) // 新的规划
         {
-            double velLimit[_Dofs] = {0.0};
-            double accLimit[_Dofs] = {0.0};
-            for (int i = 0; i < _Dofs; i++)
-            {
-                velLimit[i] = this->runSpeed * robot->getdqLimit()[i];
-                accLimit[i] = robot->getddqLimit()[i];
-            }
-            calQuinticPlan(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-                           this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-            this->nowControllerStatus = RunStatus::run_; // 开始运动
+            this->calRunQueue(robot);
         }
         if (this->newStop && this->nowControllerStatus == RunStatus::run_) // 新的急停规划
         {
-            double maxJerk[_Dofs] = {0.0};
-            double maxAcc[_Dofs] = {0.0};
-            double q[_Dofs] = {0.0};
-            double dq[_Dofs] = {0.0};
-            double ddq[_Dofs] = {0.0};
-            for (int i = 0; i < _Dofs; i++)
-            {
-                std::queue<double> empty[3];
-                maxJerk[i] = robot->getdddqLimit()[i];
-                maxAcc[i] = robot->getddqLimit()[i];
-                q[i] = this->q_dQueue[i].front();
-                dq[i] = this->dq_dQueue[i].front();
-                ddq[i] = this->ddq_dQueue[i].front();
-                swap(empty[0], q_dQueue[i]);
-                swap(empty[1], dq_dQueue[i]);
-                swap(empty[2], ddq_dQueue[i]);
-            }
-            calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, q_dQueue, dq_dQueue, ddq_dQueue);
+            this->calStopQueue(robot);
         }
         this->newPlan = false;
         this->newStop = false;
@@ -333,16 +340,18 @@ namespace robot_controller
                 this->controllerLaw->ddq_d[i] = 0;
                 break;
             case RunStatus::run_:
-                setDesiredValues(this->controllerLaw->q_d[i], this->controllerLaw->dq_d[i], this->controllerLaw->ddq_d[i],
-                                 q_dQueue[i], dq_dQueue[i], ddq_dQueue[i]);
-                // printf("%d size: %ld   %ld   %ld \n", i + 1, q_dQueue[i].size(), dq_dQueue[i].size(), ddq_dQueue[i].size());
-                checkIsEmpty(q_dQueue[i], this->q_hold[i], this->controllerLaw->q_d[i], i + 1, _Dofs, this->nowControllerStatus);
+                this->controllerLaw->q_d[i] = q_dQueue[i].front();
+                this->controllerLaw->dq_d[i] = dq_dQueue[i].front();
+                this->controllerLaw->ddq_d[i] = ddq_dQueue[i].front();
+                q_dQueue[i].pop();
+                dq_dQueue[i].pop();
+                ddq_dQueue[i].pop();
+                if (q_dQueue[i].empty())
+                {
+                    this->q_hold = this->controllerLaw->q_d;
+                    this->nowControllerStatus = RunStatus::wait_;
+                }
                 break;
-            // case RunStatus::stop_:
-            //     setDesiredValues(this->controllerLaw->q_d[i], this->controllerLaw->dq_d[i], this->controllerLaw->ddq_d[i],
-            //                      q_stopQueue[i], dq_stopQueue[i], ddq_stopQueue[i]);
-            //     checkIsEmpty(q_stopQueue[i], this->q_hold[i], this->controllerLaw->q_d[i], i + 1, _Dofs, this->nowControllerStatus);
-            //     break;
             default:
                 printf("calDesireNext error\n");
                 break;

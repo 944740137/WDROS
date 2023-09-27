@@ -3,7 +3,7 @@
 
 struct ControllerParam
 {
-    char *paramName = nullptr;
+    char paramName[2] = {0};
     double value = 0.0;
 };
 
