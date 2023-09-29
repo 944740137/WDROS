@@ -5,7 +5,8 @@
 #include <Eigen/Dense>
 // 五次多项式规划：计算时间
 template <int _Dofs>
-void calQuinticPlanTime(bool isCoordinated, double *maxVel, double *maxAcc, double *T,
+void calQuinticPlanTime(bool isCoordinated, double *T,
+                        const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc,
                         const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf)
 {
     double Tf = 0.0;
@@ -27,7 +28,8 @@ void calQuinticPlanTime(bool isCoordinated, double *maxVel, double *maxAcc, doub
 }
 // 五次多项式规划：计算队列
 template <int _Dofs>
-void calQuinticPlan(bool isCoordinated, double deltaT, double *maxVel, double *maxAcc,
+void calQuinticPlan(bool isCoordinated, double deltaT,
+                    const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc,
                     const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf,
                     std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d,
                     std::vector<std::queue<double>> &ddq_d)
@@ -40,7 +42,7 @@ void calQuinticPlan(bool isCoordinated, double deltaT, double *maxVel, double *m
     double ddqf[_Dofs] = {0.0};
     int pointNum[_Dofs] = {0};
 
-    calQuinticPlanTime<_Dofs>(isCoordinated, maxVel, maxAcc, T, q0, qf);
+    calQuinticPlanTime<_Dofs>(isCoordinated, T, maxVel, maxAcc, q0, qf);
 
     double t = 0;
     for (int i = 0; i < _Dofs; i++)
@@ -198,8 +200,8 @@ void calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double 
 }
 // 急停规划：计算队列
 template <int _Dofs>
-bool calStopPlan(bool isCoordinated, double deltaT, double *dddq, double *ddq,
-                 double *q0, double *dq0, double *ddq0,
+bool calStopPlan(bool isCoordinated, double deltaT, Eigen::Matrix<double, _Dofs, 1> &dddq, Eigen::Matrix<double, _Dofs, 1> &ddq,
+                 Eigen::Matrix<double, _Dofs, 1> &q0, Eigen::Matrix<double, _Dofs, 1> &dq0, Eigen::Matrix<double, _Dofs, 1> &ddq0,
                  std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
     double jerk1[_Dofs] = {0.0};

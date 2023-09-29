@@ -12,8 +12,8 @@ namespace my_robot
 
     private:
         // limit
-        const double dposMax[3] = {1.7};
-        const double doriMax[3] = {2.5};
+        Eigen::Matrix<double, 3, 1> dposMax; /* = {1.7, 1.7, 1.7} */
+        Eigen::Matrix<double, 3, 1> doriMax; /*  = {2.5, 2.5, 2.5} */
 
         // sensor
         Eigen::Matrix<double, _Dofs, 1> q0;
@@ -42,19 +42,19 @@ namespace my_robot
         Eigen::Matrix<double, _Dofs, 6> J_inv;
 
         // panda
-        Eigen::Matrix<double, 7, 1> externc; // 科氏项,非矩阵
-        Eigen::Matrix<double, 7, 7> externM;
-        Eigen::Matrix<double, 7, 1> externG;
-        Eigen::Matrix<double, 6, 7> externJ;
+        Eigen::Matrix<double, _Dofs, 1> externc; // 科氏项,非矩阵
+        Eigen::Matrix<double, _Dofs, 7> externM;
+        Eigen::Matrix<double, _Dofs, 1> externG;
+        Eigen::Matrix<double, 6, _Dofs> externJ;
         Eigen::Matrix<double, 6, _Dofs> externdJ;
         Eigen::Matrix<double, _Dofs, 6> externdJ_inv;
 
     public:
-        double qMax[7] = {2.7437, 1.7837, 2.9007, -0.1518, 2.8065, 4.5169, 3.0159};
-        double qMin[7] = {-2.7437, -1.7837, -2.9007, -3.0421, -2.8065, 0.5445, -3.0159};
-        double dqLimit[7] = {2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100};
-        double ddqLimit[7] = {15, 7.5, 10, 12.5, 15, 20, 20};
-        double dddqLimit[7] = {1500, 750, 1000, 1250, 1500, 2000, 2000};
+        Eigen::Matrix<double, _Dofs, 1> qMax;      /* = {2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973}; */
+        Eigen::Matrix<double, _Dofs, 1> qMin;      /* = {-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973}; */
+        Eigen::Matrix<double, _Dofs, 1> dqLimit;   /* = {2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100}; */
+        Eigen::Matrix<double, _Dofs, 1> ddqLimit;  /* = {15, 7.5, 10, 12.5, 15, 20, 20}; */
+        Eigen::Matrix<double, _Dofs, 1> dddqLimit; /* = {1500, 750, 1000, 1250, 1500, 2000, 2000}; */
 
         Robot(const Robot &) = delete;
         void operator=(const Robot &) = delete;
@@ -63,13 +63,13 @@ namespace my_robot
         virtual ~Robot();
 
         // gei limit
-        const double *const getdposMax() const;
-        const double *const getdoriMax() const;
-        const double *const getqMax() const;
-        const double *const getqMin() const;
-        const double *const getdqLimit() const;
-        const double *const getddqLimit() const;
-        const double *const getdddqLimit() const;
+        const Eigen::Matrix<double, 3, 1> &getdposMax() const;
+        const Eigen::Matrix<double, 3, 1> &getdoriMax() const;
+        const Eigen::Matrix<double, _Dofs, 1> &getqMax() const;
+        const Eigen::Matrix<double, _Dofs, 1> &getqMin() const;
+        const Eigen::Matrix<double, _Dofs, 1> &getdqLimit() const;
+        const Eigen::Matrix<double, _Dofs, 1> &getddqLimit() const;
+        const Eigen::Matrix<double, _Dofs, 1> &getdddqLimit() const;
 
         // get kinematics
         const Eigen::Matrix<double, _Dofs, 1> &getq0();
@@ -136,37 +136,37 @@ namespace my_robot
     }
 
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getdposMax() const
+    const Eigen::Matrix<double, 3, 1> &Robot<_Dofs>::getdposMax() const
     {
         return this->dposMax;
     }
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getdoriMax() const
+    const Eigen::Matrix<double, 3, 1> &Robot<_Dofs>::getdoriMax() const
     {
         return this->doriMax;
     }
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getqMax() const
+    const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getqMax() const
     {
         return this->qMax;
     }
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getqMin() const
+    const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getqMin() const
     {
         return this->qMin;
     }
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getdqLimit() const
+    const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getdqLimit() const
     {
         return this->dqLimit;
     }
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getddqLimit() const
+    const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getddqLimit() const
     {
         return this->ddqLimit;
     }
     template <int _Dofs>
-    const double *const Robot<_Dofs>::getdddqLimit() const
+    const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getdddqLimit() const
     {
         return this->dddqLimit;
     }

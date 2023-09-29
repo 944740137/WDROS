@@ -62,8 +62,9 @@ bool Communication::createConnect(key_t messageKey, key_t sharedMemorykey, Robot
 
     return true;
 }
-bool Communication::comSendMessage()
+bool Communication::comSendMessage(bool &isConnect)
 {
+    isConnect = false;
     if (this->checkConnect())
     {
         this->messageBuff.time++;
@@ -72,6 +73,7 @@ bool Communication::comSendMessage()
         if (!this->connectStatus)
         {
             printf("主站连接\n");
+            isConnect =true;
             this->connectStatus = true;
         }
         // printf("主站在线\n");

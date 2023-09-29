@@ -14,7 +14,7 @@ private:
     int timeoutCount = 0;
     int HeartBeatRecord = 0;
 
-    const int maxTimeoutCount = 5;
+    const int maxTimeoutCount = 10;
 
     Message messageBuff;
     SharedMemory *sharedMemoryBuff;
@@ -28,7 +28,7 @@ public:
     bool checkConnect();
     bool createConnect(key_t messageKey, key_t sharedMemorykey, RobotData *&robotData,
                        ControllerCommand *&controllerCommand, ControllerState *&controllerState);
-    bool comSendMessage();
+    bool comSendMessage(bool &isConnect);
     bool comRecvMessage();
     bool closeConnect();
 };

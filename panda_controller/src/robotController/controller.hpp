@@ -28,7 +28,6 @@ namespace robot_controller
         double jogSpeed_d = 0;
 
         // 规划参数
-        unsigned int nowPlanTaskNum = 0; // 当前规划任务号
         bool newPlan = false;
         TaskSpace plannerTaskSpace = TaskSpace::jointSpace;
         Eigen::Matrix<double, _Dofs, 1> q_calQueue;
@@ -36,7 +35,6 @@ namespace robot_controller
         double runSpeed_d = 0;
 
         // 急停参数
-        unsigned int nowStopTaskNum = 0; // 当前急停任务号
         bool newStop = false;
 
         // 当前运行状态
@@ -46,11 +44,6 @@ namespace robot_controller
         std::vector<std::queue<double>> q_dQueue{_Dofs};
         std::vector<std::queue<double>> dq_dQueue{_Dofs};
         std::vector<std::queue<double>> ddq_dQueue{_Dofs};
-
-        // 急停队列
-        std::vector<std::queue<double>> q_stopQueue{_Dofs};
-        std::vector<std::queue<double>> dq_stopQueue{_Dofs};
-        std::vector<std::queue<double>> ddq_stopQueue{_Dofs};
 
         // 通讯
         bool connectStatus = false;
@@ -77,8 +70,7 @@ namespace robot_controller
         const std::string &getControllerLawName();
         void dynamicSetParameter();
         void changeControllerLaw(ControllerLawType type);
-        void initParamFromMaster(my_robot::Robot<_Dofs> *robot);
-        void initParamToMaster();
+        void initStateToMaster();
         void calRunQueue(my_robot::Robot<_Dofs> *robot);
         void calStopQueue(my_robot::Robot<_Dofs> *robot);
         void startMotion();
@@ -138,31 +130,11 @@ namespace robot_controller
             controllerLaw->dynamicSetParameter(this->controllerParam, this->time);
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::initParamToMaster()
+    void Controller<_Dofs, pubDataType>::initStateToMaster()
     {
         this->controllerStateBUff->robotDof = _Dofs;
+        strcpy(this->controllerStateBUff->name, "panda\0\0\0");
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
-    }
-    template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::initParamFromMaster(my_robot::Robot<_Dofs> *robot)
-    {
-        for (int i = 0; i < _Dofs; i++)
-        {
-            robot->qMax[i] = this->controllerCommandBUff->qMax[i];
-            robot->qMin[i] = this->controllerCommandBUff->qMin[i];
-            robot->dqLimit[i] = this->controllerCommandBUff->dqLimit[i];
-            robot->ddqLimit[i] = this->controllerCommandBUff->ddqLimit[i];
-            robot->dddqLimit[i] = this->controllerCommandBUff->dddqLimit[i];
-            printf("%f %f %f %f %f\n", robot->qMax[i], robot->qMin[i], robot->dqLimit[i], robot->ddqLimit[i], robot->dddqLimit[i]);
-        }
-        this->nowStopTaskNum = this->controllerCommandBUff->stopTaskNum;
-        this->nowPlanTaskNum = this->controllerCommandBUff->planTaskNum;
-        this->jogSpeed = this->controllerCommandBUff->jogSpeed_d;
-        this->jogSpeed_d = this->controllerCommandBUff->jogSpeed_d;
-        this->runSpeed = this->controllerCommandBUff->runSpeed_d;
-        this->runSpeed_d = this->controllerCommandBUff->runSpeed_d;
-        this->controllerLawType = this->controllerCommandBUff->controllerLawType_d;
-        this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::startMotion()
@@ -172,38 +144,40 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calRunQueue(my_robot::Robot<_Dofs> *robot)
     {
-        double velLimit[_Dofs] = {0.0};
-        double accLimit[_Dofs] = {0.0};
-        for (int i = 0; i < _Dofs; i++)
-        {
-            velLimit[i] = this->runSpeed * robot->getdqLimit()[i];
-            accLimit[i] = robot->getddqLimit()[i];
-        }
-        calQuinticPlan(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        Eigen::Matrix<double, _Dofs, 1> velLimit = this->runSpeed * robot->getdqLimit();
+        Eigen::Matrix<double, _Dofs, 1> accLimit = robot->getddqLimit();
+
+        // note: 显示指定模板类型
+        calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+                              this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
         this->startMotion();
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calStopQueue(my_robot::Robot<_Dofs> *robot)
     {
-        double maxJerk[_Dofs] = {0.0};
-        double maxAcc[_Dofs] = {0.0};
-        double q[_Dofs] = {0.0};
-        double dq[_Dofs] = {0.0};
-        double ddq[_Dofs] = {0.0};
+        Eigen::Matrix<double, _Dofs, 1> maxAcc = robot->getddqLimit();
+        Eigen::Matrix<double, _Dofs, 1> maxJerk = robot->getdddqLimit();
+        Eigen::Matrix<double, _Dofs, 1> q = Eigen::Matrix<double, _Dofs, 1>::Zero();
+        Eigen::Matrix<double, _Dofs, 1> dq = Eigen::Matrix<double, _Dofs, 1>::Zero();
+        Eigen::Matrix<double, _Dofs, 1> ddq = Eigen::Matrix<double, _Dofs, 1>::Zero();
         for (int i = 0; i < _Dofs; i++)
         {
-            std::queue<double> empty[3];
-            maxJerk[i] = robot->getdddqLimit()[i];
-            maxAcc[i] = robot->getddqLimit()[i];
             q[i] = this->q_dQueue[i].front();
             dq[i] = this->dq_dQueue[i].front();
             ddq[i] = this->ddq_dQueue[i].front();
-            swap(empty[0], q_dQueue[i]);
-            swap(empty[1], dq_dQueue[i]);
-            swap(empty[2], ddq_dQueue[i]);
         }
+        this->clearRunQueue();
         calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, q_dQueue, dq_dQueue, ddq_dQueue);
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::clearRunQueue()
+    {
+        for (int i = 0; i < _Dofs; i++)
+        {
+            std::queue<double>().swap(q_dQueue[i]);
+            std::queue<double>().swap(dq_dQueue[i]);
+            std::queue<double>().swap(ddq_dQueue[i]);
+        }
     }
     
     // init
@@ -233,9 +207,12 @@ namespace robot_controller
             printf("通信模型建立成功\n");
         }
 
-        // read
-        this->initParamToMaster();
-        this->initParamFromMaster(robot);
+        // init state
+        this->initStateToMaster();
+        // 丢弃数据
+        this->controllerCommandBUff->stopSign = false;
+        this->controllerCommandBUff->runSign = false;
+        this->controllerCommandBUff->newLimit = false;
         changeControllerLaw(this->controllerLawType);
     }
 
@@ -254,14 +231,13 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::communication(my_robot::Robot<_Dofs> *robot)
     {
-        if (!this->connectStatus && this->communicationModel.comSendMessage())
-        {
-            this->initParamFromMaster(robot);
-        }
-        this->connectStatus = this->communicationModel.comSendMessage();
+        bool isConnect = false;
+        this->connectStatus = this->communicationModel.comSendMessage(isConnect);
 
         if (!this->connectStatus)
             return;
+
+        // note: matrix->数组
         std::copy(this->controllerLaw->q_d.data(), this->controllerLaw->q_d.data() + _Dofs, this->robotDataBuff->q_d);
         std::copy(robot->getq().data(), robot->getq().data() + _Dofs, this->robotDataBuff->q);
         std::copy(robot->getdq().data(), robot->getdq().data() + _Dofs, this->robotDataBuff->dq);
@@ -281,17 +257,27 @@ namespace robot_controller
 
         this->jogSign = this->controllerCommandBUff->jogSign;
 
-        if (this->nowPlanTaskNum != this->controllerCommandBUff->planTaskNum) // 新的规划任务
+        if (this->controllerCommandBUff->newLimit) // 新的限位设置
+        {
+            // note: 数组->matrix
+            robot->qMax = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->qMax, _Dofs, 1);
+            robot->qMin = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->qMin, _Dofs, 1);
+            robot->dqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->dqLimit, _Dofs, 1);
+            robot->ddqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->ddqLimit, _Dofs, 1);
+            robot->dddqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->dddqLimit, _Dofs, 1);
+            this->controllerCommandBUff->newLimit = false;
+        }
+        if (this->controllerCommandBUff->runSign) // 新的规划任务
         {
             this->plannerTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
             this->q_calQueue = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->q_final, _Dofs, 1);
+            this->controllerCommandBUff->runSign = false;
             this->newPlan = true;
-            this->nowPlanTaskNum = this->controllerCommandBUff->planTaskNum;
         }
-        if (this->nowStopTaskNum != this->controllerCommandBUff->stopTaskNum) // 新的急停任务
+        if (this->controllerCommandBUff->stopSign) // 新的急停任务
         {
+            this->controllerCommandBUff->stopSign = false;
             this->newStop = true;
-            this->nowStopTaskNum = this->controllerCommandBUff->stopTaskNum;
         }
     }
     template <int _Dofs, typename pubDataType>
@@ -299,6 +285,7 @@ namespace robot_controller
     {
         if (!this->connectStatus)
             return;
+
         if (this->controllerLawType != this->controllerLawType_d) // 切换控制器
         {
             changeControllerLaw(this->controllerLawType_d);
@@ -330,16 +317,17 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calDesireNext(my_robot::Robot<_Dofs> *robot)
     {
-        for (int i = 0; i < _Dofs; i++)
+
+        switch (this->nowControllerStatus)
         {
-            switch (this->nowControllerStatus)
+        case RunStatus::wait_:
+            this->controllerLaw->q_d = this->q_hold;
+            this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            break;
+        case RunStatus::run_:
+            for (int i = 0; i < _Dofs; i++)
             {
-            case RunStatus::wait_:
-                this->controllerLaw->q_d[i] = this->q_hold[i];
-                this->controllerLaw->dq_d[i] = 0;
-                this->controllerLaw->ddq_d[i] = 0;
-                break;
-            case RunStatus::run_:
                 this->controllerLaw->q_d[i] = q_dQueue[i].front();
                 this->controllerLaw->dq_d[i] = dq_dQueue[i].front();
                 this->controllerLaw->ddq_d[i] = ddq_dQueue[i].front();
@@ -351,11 +339,11 @@ namespace robot_controller
                     this->q_hold = this->controllerLaw->q_d;
                     this->nowControllerStatus = RunStatus::wait_;
                 }
-                break;
-            default:
-                printf("calDesireNext error\n");
-                break;
             }
+            break;
+        default:
+            printf("calDesireNext error\n");
+            break;
         }
     }
     template <int _Dofs, typename pubDataType>
@@ -397,7 +385,7 @@ namespace robot_controller
             controllerLaw->setControllerLaw(robot, tau_d);
     }
 
-    //
+    // ROS
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::recordData(my_robot::Robot<_Dofs> *robot)
     {
@@ -425,7 +413,6 @@ namespace robot_controller
         // this->myfile << "q_d: " << this->controllerLaw->q_d.transpose() << "\n";
         // this->myfile << "dq_d: " << this->controllerLaw->dq_d.transpose() << "\n";
         // this->myfile << "ddq_d: " << this->controllerLaw->ddq_d.transpose() << "\n";
-
         // this->myfile << "Position0: " << robot->getPosition0().transpose() << "\n";
         // this->myfile << "Orientation0: " << robot->getOrientation0().toRotationMatrix().eulerAngles(2, 1, 0).transpose() << "\n";
         // this->myfile << "Position: " << robot->getPosition().transpose() << "\n";
@@ -434,23 +421,22 @@ namespace robot_controller
         // this->myfile << "Orientation: " << robot->getdOrientation().toRotationMatrix().eulerAngles(2, 1, 0).transpose() << "\n";
         // this->myfile << "T:" << n;
         // this->myfile << robot->getT().matrix() << "\n";
-
-        this->myfile << "M:" << n;
-        this->myfile << robot->getM() << "\n";
-        this->myfile << "ExternM:" << n;
-        this->myfile << robot->getExternM() << "\n";
-        this->myfile << "C: " << n;
-        this->myfile << robot->getC() * robot->getdq() << "\n";
-        this->myfile << "Externc: " << n;
-        this->myfile << robot->getExternc() << "\n";
-        this->myfile << "G: " << n;
-        this->myfile << robot->getG() << n;
-        this->myfile << "ExternG: " << n;
-        this->myfile << robot->getExternG() << n;
-        this->myfile << "J: " << n;
-        this->myfile << robot->getJ() << "\n";
-        this->myfile << "ExternJ: " << n;
-        this->myfile << robot->getExternJ() << "\n";
+        // this->myfile << "M:" << n;
+        // this->myfile << robot->getM() << "\n";
+        // this->myfile << "ExternM:" << n;
+        // this->myfile << robot->getExternM() << "\n";
+        // this->myfile << "C: " << n;
+        // this->myfile << robot->getC() * robot->getdq() << "\n";
+        // this->myfile << "Externc: " << n;
+        // this->myfile << robot->getExternc() << "\n";
+        // this->myfile << "G: " << n;
+        // this->myfile << robot->getG() << n;
+        // this->myfile << "ExternG: " << n;
+        // this->myfile << robot->getExternG() << n;
+        // this->myfile << "J: " << n;
+        // this->myfile << robot->getJ() << "\n";
+        // this->myfile << "ExternJ: " << n;
+        // this->myfile << robot->getExternJ() << "\n";
 
         // this->myfile << "getTorque: " << robot->getTorque().transpose() << "\n";
         // this->myfile << "tau_d: " << this->controllerLaw->tau_d.transpose() << "\n";
