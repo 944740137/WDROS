@@ -148,8 +148,12 @@ namespace robot_controller
         Eigen::Matrix<double, _Dofs, 1> accLimit = robot->getddqLimit();
 
         // note: 显示指定模板类型
-        calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-                              this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+
+        // calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+        //                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+
+        calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+                          this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
         this->startMotion();
     }
     template <int _Dofs, typename pubDataType>
@@ -167,7 +171,8 @@ namespace robot_controller
             ddq[i] = this->ddq_dQueue[i].front();
         }
         this->clearRunQueue();
-        calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, q_dQueue, dq_dQueue, ddq_dQueue);
+        if (!calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, q_dQueue, dq_dQueue, ddq_dQueue))
+            std::cout << "calStopPlan error" << std::endl;
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::clearRunQueue()
@@ -179,7 +184,7 @@ namespace robot_controller
             std::queue<double>().swap(ddq_dQueue[i]);
         }
     }
-    
+
     // init
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::init(int recordPeriod, my_robot::Robot<_Dofs> *robot)
@@ -191,13 +196,13 @@ namespace robot_controller
         // tmp
         for (int i = 0; i < _Dofs; i++)
         {
-            controllerParam.jointParam1[i].value = 50;
-            controllerParam.jointParam2[i].value = 5;
+            controllerParam.jointParam1[i].value = 80;
+            controllerParam.jointParam2[i].value = 20;
         }
         for (int i = 0; i < 6; i++)
         {
-            controllerParam.cartesianParam1[i].value = 50;
-            controllerParam.cartesianParam2[i].value = 5;
+            controllerParam.cartesianParam1[i].value = 80;
+            controllerParam.cartesianParam2[i].value = 20;
         }
 
         // 建立通信 建立数据映射
@@ -258,8 +263,7 @@ namespace robot_controller
         this->jogSign = this->controllerCommandBUff->jogSign;
 
         if (this->controllerCommandBUff->newLimit) // 新的限位设置
-        {
-            // note: 数组->matrix
+        {                                          // note: 数组->matrix
             robot->qMax = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->qMax, _Dofs, 1);
             robot->qMin = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->qMin, _Dofs, 1);
             robot->dqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->dqLimit, _Dofs, 1);

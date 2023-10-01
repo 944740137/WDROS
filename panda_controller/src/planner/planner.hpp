@@ -223,3 +223,153 @@ bool calStopPlan(bool isCoordinated, double deltaT, Eigen::Matrix<double, _Dofs,
     }
     return true;
 }
+
+//***********************************************************************************************************************************//
+
+// TVP规划：最短时间规划
+template <int _Dofs>
+bool calTVPPlanParam(double deltaT, double q0, double qf, double dq0, double maxAcc,
+                     double &vel, double &acc1, double &acc2, double &planTime)
+{
+    double S = qf - q0;
+    double S1, S2, S3;
+    if (S < 0)
+        vel = -vel;
+
+    if (dq0 <= vel)
+        acc1 = maxAcc;
+    else
+        acc1 = -maxAcc;
+    if (0 <= vel)
+        acc2 = -maxAcc;
+    else
+        acc2 = maxAcc;
+
+    if ((vel * dq0 > 0) && std::fabs(S) <= (std::fabs(dq0 * dq0) / (2 * acc1)))
+    {
+        return false;
+    }
+
+    if (std::fabs((vel * vel - dq0 * dq0) / (2 * acc1) + (0 - vel * vel) / (2 * acc2)) < (std::fabs(S)))
+    {
+        S1 = (vel * vel - dq0 * dq0) / (2 * acc1);
+        S3 = (0 - vel * vel) / (2 * (acc2));
+        S2 = S - (S1 + S3);
+    }
+    else
+    {
+        vel = sqrt((2 * acc1 * S + dq0 * dq0) / 2);
+        if (S < 0)
+            vel = -vel;
+        S1 = (vel * vel - dq0 * dq0) / (2 * acc1);
+        S3 = (0 - vel * vel) / (2 * (acc2));
+        S2 = 0;
+    }
+
+    double T1 = std::fabs((vel - dq0) / (acc1));
+    double T2 = std::fabs(S2 / vel);
+    double T3 = std::fabs((0 - vel) / (acc2));
+    planTime = T1 + T2 + T3;
+    return true;
+}
+// TVP规划：固定时间规划
+template <int _Dofs>
+void calTVPPlanQueue(double deltaT, double q0, double qf, double dq0, double maxPlanTime,
+                     double acc1, double acc2, double vel,
+                     std::queue<double> &q_d, std::queue<double> &dq_d, std::queue<double> &ddq_d)
+{
+    double S = qf - q0;
+    if (dq0 * vel > 0 && std::fabs(vel) > std::fabs(dq0)) // 确定acc1的符号
+    {
+        double T = std::fabs(dq0 / acc1) + std::fabs((S - ((-dq0 * dq0) / (2 * acc2))) / dq0);
+        if (maxPlanTime <= T)
+            acc1 = acc1;
+        else
+            acc1 = -acc1;
+    }
+    double A = acc1 - acc2;
+    double B = (2 * acc1 * acc2 * maxPlanTime + 2 * acc2 * dq0);
+    double C = -2 * acc1 * acc2 * S - acc2 * dq0 * dq0;
+    if (A == 0)
+    {
+        vel = -C / B;
+    }
+    else
+    {
+        vel = (-B - std::sqrt(B * B - 4 * A * C)) / (2 * A);
+    }
+
+    double S1 = (vel * vel - dq0 * dq0) / (2 * acc1);
+    double S3 = (0 - vel * vel) / (2 * acc2);
+    double S2 = S - (S1 + S3);
+
+    double T1 = std::fabs((vel - dq0) / acc1);
+    double T2 = std::fabs(S2 / vel);
+    double T3 = std::fabs((0 - vel) / acc2);
+
+    int totalNum = std::ceil((T1 + T2 + T3) / deltaT);
+    for (int num = 0; num <= totalNum; ++num)
+    {
+        double t = num * deltaT;
+        double detlaq;
+        double detladq;
+        if (t >= 0 && t < T1)
+        {
+            double nowt = t;
+            detladq = acc1 * nowt;
+            detlaq = dq0 * nowt + 0.5 * acc1 * nowt * nowt;
+            q_d.push(q0 + detlaq);
+            dq_d.push(dq0 + detladq);
+            ddq_d.push(acc1);
+        }
+        else if (t >= T1 && t < (T1 + T2))
+        {
+            double nowt = t - T1;
+            detlaq = S1 + nowt * vel;
+            q_d.push(q0 + detlaq);
+            dq_d.push(vel);
+            ddq_d.push(0);
+        }
+        else if (t >= (T1 + T2) && t < (T1 + T2 + T3))
+        {
+            double nowt = t - T1 - T2;
+            detladq = acc2 * nowt;
+            detlaq = S1 + S2 + vel * nowt + 0.5 * acc2 * nowt * nowt;
+            q_d.push(q0 + detlaq);
+            dq_d.push(vel + detladq);
+            ddq_d.push(acc2);
+        }
+        else if (num == totalNum)
+        {
+            q_d.push(qf);
+            dq_d.push(0.0);
+            ddq_d.push(0.0);
+        }
+    }
+}
+// TVP规划：计算队列
+template <int _Dofs>
+bool calTVPPlan(bool isCoordinated, double deltaT,
+                const Eigen::Matrix<double, _Dofs, 1> &vel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc,
+                const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+{
+    double acc1[_Dofs] = {0.0};
+    double acc2[_Dofs] = {0.0};
+    double planTime = 0;
+    double maxPlanTime = 0;
+
+    Eigen::Matrix<double, _Dofs, 1> atuVel = vel;
+    for (int i = 0; i < _Dofs; i++)
+    {
+        if (!calTVPPlanParam<_Dofs>(deltaT, q0[i], qf[i], dq0[i], maxAcc[i], atuVel[i], acc1[i], acc2[i], planTime))
+            return false;
+        if (i == 0 || maxPlanTime < planTime)
+            maxPlanTime = planTime;
+    }
+    for (int i = 0; i < _Dofs; i++)
+    {
+        calTVPPlanQueue<_Dofs>(deltaT, q0[i], qf[i], dq0[i], maxPlanTime, acc1[i], acc2[i], atuVel[i], q_d[i], dq_d[i], ddq_d[i]);
+    }
+    return true;
+}
