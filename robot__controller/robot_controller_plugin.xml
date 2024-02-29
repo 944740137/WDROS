@@ -1,0 +1,7 @@
+<library path="lib/librobot_controller">
+      <class name="robot_controller/PandaController" type="robot_controller::PandaController" base_class_type="controller_interface::ControllerBase">
+    <description>
+          robot_controller 主控制器
+    </description>
+  </class>
+</library>
