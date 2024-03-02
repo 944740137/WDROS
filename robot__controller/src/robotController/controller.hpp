@@ -58,6 +58,10 @@ namespace robot_controller
         std::unique_ptr<ControllerLaw<_Dofs>> controllerLaw;
         ControllerParamBase<_Dofs> controllerParam;
 
+        // 规划器
+        Planner plannerType = Planner::Quintic_;
+        Planner plannerType_d = Planner::Quintic_;
+
     public:
         Controller(const Controller &) = delete;
         void operator=(const Controller &) = delete;
@@ -146,16 +150,35 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calRunQueue(my_robot::Robot<_Dofs> *robot)
     {
-        Eigen::Matrix<double, _Dofs, 1> velLimit = this->runSpeed * robot->getdqLimit();
+        Eigen::Matrix<double, _Dofs, 1> velLimit = this->runSpeed * robot->getdqLimit(); // 这里的velLimit是速度
         Eigen::Matrix<double, _Dofs, 1> accLimit = robot->getddqLimit();
 
         // note: 显示指定模板类型
 
-        // calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-        //                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        switch (this->plannerType)
+        {
+        case Planner::Quintic_:
+            std::cout << "五次多项式规划" << std::endl;
+            calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+                                  this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+            break;
+        case Planner::TVP_:
+            std::cout << "TVP规划" << std::endl;
+            calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+                              this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+            break;
+        case Planner::SS_:
+            std::cout << "SS规划" << std::endl;
+            calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+                              this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+            break;
+        default:
+            std::cout << "Unknown planner type using calQuinticPlan!!!!!" << std::endl;
+            calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+                                  this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+            break;
+        }
 
-        calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-                          this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
         this->startMotion();
     }
     template <int _Dofs, typename pubDataType>
@@ -199,13 +222,13 @@ namespace robot_controller
         // tmp
         for (int i = 0; i < _Dofs; i++)
         {
-            controllerParam.jointParam1[i].value = 80;
-            controllerParam.jointParam2[i].value = 20;
+            controllerParam.jointParam1[i].value = 40;
+            controllerParam.jointParam2[i].value = 10;
         }
         for (int i = 0; i < 6; i++)
         {
-            controllerParam.cartesianParam1[i].value = 80;
-            controllerParam.cartesianParam2[i].value = 20;
+            controllerParam.cartesianParam1[i].value = 40;
+            controllerParam.cartesianParam2[i].value = 10;
         }
 
         // 建立通信 建立数据映射
@@ -263,7 +286,7 @@ namespace robot_controller
         this->jogSpeed_d = this->controllerCommandBUff->jogSpeed_d;
         this->runSpeed_d = this->controllerCommandBUff->runSpeed_d;
         this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
-
+        this->plannerType_d = this->controllerCommandBUff->plannerType_d;
         this->jogSign = this->controllerCommandBUff->jogSign;
 
         if (this->controllerCommandBUff->newLimit) // 新的限位设置
@@ -298,6 +321,10 @@ namespace robot_controller
         {
             changeControllerLaw(this->controllerLawType_d);
             this->controllerLawType = this->controllerLawType_d;
+        }
+        if (this->plannerType != this->plannerType_d) // 切换规划器
+        {
+            this->plannerType = this->plannerType_d;
         }
         if (this->jogSpeed != this->jogSpeed_d) // 更改点动速度
         {
