@@ -24,7 +24,7 @@ namespace robot_controller
 
         // 点动参数
         unsigned int jogSign = 0;
-        double jogSpeed = 0;
+        double jogSpeed = 0; // 0-1
         double jogSpeed_d = 0;
 
         // 规划参数
@@ -158,22 +158,22 @@ namespace robot_controller
         switch (this->plannerType)
         {
         case Planner::Quintic_:
-            std::cout << "五次多项式规划" << std::endl;
+            std::cout << "[robotController] 五次多项式规划" << std::endl;
             calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
                                   this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
             break;
         case Planner::TVP_:
-            std::cout << "TVP规划" << std::endl;
+            std::cout << "[robotController] TVP规划" << std::endl;
             calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
                               this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
             break;
         case Planner::SS_:
-            std::cout << "SS规划" << std::endl;
+            std::cout << "[robotController] SS规划" << std::endl;
             calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
                               this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
             break;
         default:
-            std::cout << "Unknown planner type using calQuinticPlan!!!!!" << std::endl;
+            std::cout << "[robotController] Unknown planner type using calQuinticPlan!!!!!" << std::endl;
             calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
                                   this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
             break;
@@ -184,6 +184,7 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calStopQueue(my_robot::Robot<_Dofs> *robot)
     {
+        std::cout << "[robotController] 急停规划" << std::endl;
         Eigen::Matrix<double, _Dofs, 1> maxAcc = robot->getddqLimit();
         Eigen::Matrix<double, _Dofs, 1> maxJerk = robot->getdddqLimit();
         Eigen::Matrix<double, _Dofs, 1> q = Eigen::Matrix<double, _Dofs, 1>::Zero();
@@ -283,8 +284,8 @@ namespace robot_controller
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
 
         // read
-        this->jogSpeed_d = this->controllerCommandBUff->jogSpeed_d;
-        this->runSpeed_d = this->controllerCommandBUff->runSpeed_d;
+        this->jogSpeed_d = (double)this->controllerCommandBUff->jogSpeed_d / 100.0;
+        this->runSpeed_d = (double)this->controllerCommandBUff->runSpeed_d / 100.0;
         this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
         this->plannerType_d = this->controllerCommandBUff->plannerType_d;
         this->jogSign = this->controllerCommandBUff->jogSign;

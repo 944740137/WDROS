@@ -29,20 +29,20 @@ bool Communication::createConnect(key_t messageKey, key_t sharedMemorykey, Robot
     this->shm_id = shmget((key_t)SM_ID, sizeof(struct SharedMemory), 0666 | IPC_CREAT);
     if (this->shm_id < 0)
     {
-        printf("第一次共享内存创建失败\n");
+        printf("[robotController] 第一次共享内存创建失败\n");
         return false;
     }
     else
-        printf("共享内存创建成功\n");
+        printf("[robotController] 共享内存创建成功\n");
 
     shared_memory = shmat(this->shm_id, NULL, 0);
     if (shared_memory == nullptr)
     {
-        printf("共享内存映射失败\n");
+        printf("[robotController] 共享内存映射失败\n");
         return false;
     }
     else
-        printf("共享内存映射成功\n");
+        printf("[robotController] 共享内存映射成功\n");
 
     this->sharedMemoryBuff = (struct SharedMemory *)shared_memory;
     this->sharedMemoryBuff->slaveHeartbeat = 0;
@@ -54,11 +54,11 @@ bool Communication::createConnect(key_t messageKey, key_t sharedMemorykey, Robot
     this->msgid = msgget((key_t)messageKey, 0666 | IPC_CREAT);
     if (this->msgid == -1)
     {
-        printf("消息队列创建失败\n");
+        printf("[robotController] 消息队列创建失败\n");
         return false;
     }
     else
-        printf("消息队列创建成功\n");
+        printf("[robotController] 消息队列创建成功\n");
 
     return true;
 }
@@ -72,7 +72,7 @@ bool Communication::comSendMessage(bool &isConnect)
         /*读取*/
         if (!this->connectStatus)
         {
-            printf("主站连接\n");
+            printf("[robotController] 主站连接\n");
             isConnect =true;
             this->connectStatus = true;
         }
@@ -86,7 +86,7 @@ bool Communication::comSendMessage(bool &isConnect)
     {
         if (this->connectStatus)
         {
-            printf("主站断开\n");
+            printf("[robotController] 主站断开\n");
             this->connectStatus = false;
         }
         // printf("主站离线\n");
