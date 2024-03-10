@@ -278,8 +278,8 @@ namespace robot_controller
 
         for (int i = 0; i < 3; i++)
         {
-            this->robotDataBuff->position[i] = robot->getdOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
-            this->robotDataBuff->orientation[i] = robot->getdPosition()[i];
+            this->robotDataBuff->position[i] = robot->getPosition()[i];
+            this->robotDataBuff->orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
         }
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
 
