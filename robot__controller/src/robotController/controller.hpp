@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include "math.h"
 
 namespace robot_controller
 {
@@ -269,17 +270,19 @@ namespace robot_controller
 
         if (!this->connectStatus)
             return;
-
+        // write
+        for (int i = 0; i < _Dofs; i++)
+        {
+            this->robotDataBuff->q_d[i] = this->controllerLaw->q_d[i] * 180.0 / M_PI;
+            this->robotDataBuff->q[i] = robot->getq()[i] * 180.0 / M_PI;
+            this->robotDataBuff->dq[i] = robot->getdq()[i] * 180.0 / M_PI;
+        }
         // note: matrix->数组
-        std::copy(this->controllerLaw->q_d.data(), this->controllerLaw->q_d.data() + _Dofs, this->robotDataBuff->q_d);
-        std::copy(robot->getq().data(), robot->getq().data() + _Dofs, this->robotDataBuff->q);
-        std::copy(robot->getdq().data(), robot->getdq().data() + _Dofs, this->robotDataBuff->dq);
         std::copy(robot->getTorque().data(), robot->getTorque().data() + _Dofs, this->robotDataBuff->tau);
-
         for (int i = 0; i < 3; i++)
         {
             this->robotDataBuff->position[i] = robot->getPosition()[i];
-            this->robotDataBuff->orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
+            this->robotDataBuff->orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
         }
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
 
@@ -292,17 +295,23 @@ namespace robot_controller
 
         if (this->controllerCommandBUff->newLimit) // 新的限位设置
         {                                          // note: 数组->matrix
-            robot->qMax = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->qMax, _Dofs, 1);
-            robot->qMin = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->qMin, _Dofs, 1);
-            robot->dqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->dqLimit, _Dofs, 1);
-            robot->ddqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->ddqLimit, _Dofs, 1);
-            robot->dddqLimit = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->dddqLimit, _Dofs, 1);
+            for (int i = 0; i < _Dofs; i++)
+            {
+                robot->qMax[i] = this->controllerCommandBUff->qMax[i] * M_PI / 180.0;
+                robot->qMin[i] = this->controllerCommandBUff->qMin[i] * M_PI / 180.0;
+                robot->dqLimit[i] = this->controllerCommandBUff->dqLimit[i] * M_PI / 180.0;
+                robot->ddqLimit[i] = this->controllerCommandBUff->ddqLimit[i] * M_PI / 180.0;
+                robot->dddqLimit[i] = this->controllerCommandBUff->dddqLimit[i] * M_PI / 180.0;
+            }
             this->controllerCommandBUff->newLimit = false;
         }
         if (this->controllerCommandBUff->runSign) // 新的规划任务
         {
             this->plannerTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
-            this->q_calQueue = Eigen::Map<Eigen::MatrixXd>(this->controllerCommandBUff->q_final, _Dofs, 1);
+            for (int i = 0; i < _Dofs; i++)
+            {
+                this->q_calQueue[i] = this->controllerCommandBUff->q_final[i] * M_PI / 180.0;
+            }
             this->controllerCommandBUff->runSign = false;
             this->newPlan = true;
         }
