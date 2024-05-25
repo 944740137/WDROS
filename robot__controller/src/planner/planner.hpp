@@ -3,6 +3,34 @@
 #include <iostream>
 #include <Eigen/Core>
 #include <Eigen/Dense>
+#include <complex.h>
+// 关节规划器
+template <int _Dofs>
+class Planner
+{
+public:
+public:
+    Planner(const Planner &) = delete;
+    void operator=(const Planner &) = delete;
+
+    Planner();
+    virtual ~Planner();
+
+    virtual void calPlanQueue(bool isCoordinated, double deltaT,
+                              const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
+                              const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                              std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d) = 0;
+};
+template <int _Dofs>
+Planner<_Dofs>::~Planner()
+{
+}
+template <int _Dofs>
+Planner<_Dofs>::Planner()
+{
+    // 全部初始化为0
+}
+
 // 五次多项式规划：计算时间
 template <int _Dofs>
 void calQuinticPlanTime(bool isCoordinated, double *T,
@@ -67,6 +95,8 @@ void calQuinticPlan(bool isCoordinated, double deltaT,
         }
     }
 }
+
+//***********************************************************************************************************************************//
 
 // 急停规划：最短时间规划
 template <int _Dofs>
@@ -370,6 +400,437 @@ bool calTVPPlan(bool isCoordinated, double deltaT,
     for (int i = 0; i < _Dofs; i++)
     {
         calTVPPlanQueue<_Dofs>(deltaT, q0[i], qf[i], dq0[i], maxPlanTime, acc1[i], acc2[i], atuVel[i], q_d[i], dq_d[i], ddq_d[i]);
+    }
+    return true;
+}
+
+// SS规划：最短时间规划
+template <int _Dofs>
+bool calSSPlanParam(double deltaT, double q0, double qf, double vel, double maxAcc, double maxJerk,
+                    double &acc1, double &acc2, double &j1, double &j2, double &j3, double &j4, double &planTime)
+{
+    double S = qf - q0;
+    double T1, T2, T3, T4, T5, T6, T7;
+    double S1, S2, S3, S4, S5, S6, S7;
+    if (S < 0)
+    {
+        vel = -vel;
+        acc1 = -maxAcc; // 加速段最大加速度
+        acc2 = maxAcc;  // 减速段最大加速度
+        j1 = -maxJerk;
+        j2 = maxJerk;
+        j3 = maxJerk;
+        j4 = -maxJerk;
+    }
+    else
+    {
+        acc1 = maxAcc;
+        acc2 = -maxAcc;
+        j1 = maxJerk;
+        j2 = -maxJerk;
+        j3 = -maxJerk;
+        j4 = maxJerk;
+    }
+
+    // 根据Vm判断有无匀加减速段
+    if (std::fabs((std::pow(acc1, 2) - 0) / (2 * j1) + (0 - std::pow(acc1, 2)) / (2 * j2)) < std::fabs(vel - 0))
+    {
+        T1 = std::fabs(acc1 / j1);
+        T3 = std::fabs(-acc1 / j2);
+        T2 = (vel - (std::pow(acc1, 2) - 0) / (2 * j1) - (0 - std::pow(acc1, 2)) / (2 * j2)) / acc1;
+
+        // 判断有无匀速段
+        S1 = (1.0 / 6.0) * j1 * std::pow(T1, 3);
+        S2 = (1.0 / 2.0) * j1 * std::pow(T1, 2) * T2 + (1.0 / 2.0) * acc1 * std::pow(T2, 2);
+        S3 = ((1.0 / 2.0) * j1 * std::pow(T1, 2) + acc1 * T2) * T3 + (1.0 / 2.0) * acc1 * std::pow(T3, 2) + (1.0 / 6.0) * j2 * std::pow(T1, 3);
+
+        if (2 * std::fabs(S1 + S2 + S3) < std::fabs(S))
+        {
+            // 有匀加减速段,有匀速段 1
+            T4 = (S - 2 * (S1 + S2 + S3)) / vel;
+            T5 = T3;
+            T6 = T2;
+            T7 = T1;
+        }
+        else
+        {
+            S1 = (1.0 / 6.0) * j1 * std::pow(T1, 3);
+            S3 = (1.0 / 2.0) * j1 * std::pow(T1, 2) * T3 + (1.0 / 2.0) * acc1 * std::pow(T3, 2) + (1.0 / 6.0) * j2 * std::pow(T1, 3);
+            if (2 * std::fabs(S1 + S3) < std::fabs(S))
+            {
+                // 有匀加减速段,无匀速段 2
+                double Se = (S - (S1 + S3)) / 2.0;
+                double A = (1.0 / 2.0) * acc1;
+                double B = (1.0 / 2.0) * j1 * std::pow(T1, 2) + T3 * acc1;
+                double C = (1.0 / 2.0) * j1 * std::pow(T1, 2) * T3 - Se;
+                T2 = std::fabs(std::max((-B - std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A), (-B + std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A)));
+                T4 = 0;
+                T5 = T3;
+                T6 = T2;
+                T7 = T1;
+            }
+            else
+            {
+                // 无匀加减速段,无匀速段 3
+                T1 = std::fabs(std::pow(S / (2 * ((1.0 / 6.0) * j1 + (1.0 / 6.0) * j2 + j1)), 1.0 / 3.0));
+                acc1 = j1 * T1;
+                acc2 = -acc1;
+                T2 = 0;
+                T3 = T1;
+                T4 = 0;
+                T5 = T1;
+                T6 = 0;
+                T7 = T1;
+            }
+        }
+    }
+    else
+    {
+        acc1 = (vel >= 0 ? 1 : -1) * std::sqrt(vel * j1);
+        T1 = std::fabs(acc1 / j1);
+        T3 = T1;
+        S1 = (1.0 / 6.0) * j1 * std::pow(T1, 3);
+        S3 = (1.0 / 2.0) * j1 * std::pow(T1, 2) * T3 + (1.0 / 2.0) * acc1 * std::pow(T3, 2) + (1.0 / 6.0) * j2 * std::pow(T1, 3);
+
+        if (2 * std::fabs(S1 + S3) < std::fabs(S))
+        {
+            // 无匀加减速段,,有匀速段 4
+            acc2 = -acc1;
+            T4 = std::fabs((S - 2 * (S1 + S3)) / vel);
+            T2 = 0;
+            T5 = T3;
+            T6 = 0;
+            T7 = T1;
+        }
+        else
+        {
+            // 无匀加减速段,无匀速段 5
+            T1 = std::fabs(std::pow(S / (2 * ((1.0 / 6.0) * j1 + (1.0 / 6.0) * j2 + j1)), 1.0 / 3.0));
+            acc1 = j1 * T1;
+            acc2 = -acc1;
+            T2 = 0;
+            T3 = T1;
+            T4 = 0;
+            T5 = T1;
+            T6 = 0;
+            T7 = T1;
+        }
+    }
+    planTime = T1 + T2 + T3 + T4 + T5 + T6 + T7;
+    return true;
+}
+// SS规划：固定时间规划
+template <int _Dofs>
+void calSSPlanQueue(double deltaT, double q0, double qf, double vel, double maxAcc, double maxJerk,
+                    double &acc1, double &acc2, double &j1, double &j2, double &j3, double &j4, double &planTime,
+                    std::queue<double> &q_d, std::queue<double> &dq_d, std::queue<double> &ddq_d)
+{
+    double S = qf - q0;
+    double T1, T2, T3, T4, T5, T6, T7;
+    double S1, S2, S3, S4, S5, S6, S7;
+
+    T1 = std::fabs(acc1 / j1);
+    double v = 2 * (1 / 2.0) * j1 * T1 * T1;
+    double S13 = j1 * std::pow(T1, 3);
+
+    auto findCubicRoot = [&]() mutable
+    {
+        double a = -2 * j1;
+        double b = j1 * planTime;
+        double c = 0;
+        double d = -S;
+        double p = (3 * a * c - b * b) / (3 * a * a);
+        double q = (2 * std::pow(b, 3) - 9 * a * b * c + 27 * a * a * d) / (27 * std::pow(a, 3));
+
+        std::complex<double> theta[3], t[3], x[3];
+        for (int i = 0; i < 3; ++i)
+        {
+            theta[i] = (1.0 / 3.0) * std::acos((3 * q / (2 * p)) * std::sqrt(-3.0 / p)) - (2 * i / 3.0) * M_PI;
+            t[i] = 2 * std::sqrt(-p / 3.0) * std::cos(theta[i]);
+            x[i] = t[i] - b / (3.0 * a);
+        }
+        T1 = 0;
+        for (int i = 0; i < 3; ++i)
+        {
+            if (std::fabs(x[i].imag()) <= 0.000000001 && x[i].real() > 0)
+            {
+                if ((T1 != 0 && x[i].real() < T1) || T1 == 0)
+                {
+                    T1 = x[i].real();
+                }
+            }
+        }
+        acc1 = j1 * T1;
+        acc2 = -acc1;
+        T2 = 0;
+        T3 = T1;
+        T4 = planTime - 4 * T1;
+        T5 = T1;
+        T6 = 0;
+        T7 = T1;
+    };
+
+    if ((std::fabs(S) - std::fabs(2 * S13)) > 0)
+    {
+        if ((planTime + deltaT) > 4 * T1)
+        {
+            T4 = std::fabs((S - 2 * S13) / v);
+            if (4 * T1 + T4 > (planTime + deltaT))
+            {
+                // std::cout << "有匀加减速段,有匀速段 1 " << std::endl;
+                S13 = S13 - (0.5) * j1 * T1 * T1 * T1;
+                double Se = S - 2 * S13;
+                double Te = planTime - 4 * T1;
+                double A = -acc1;
+                double B = j1 * std::pow(T1, 2) + acc1 * Te;
+                double C = j1 * std::pow(T1, 3) + acc1 * T1 * Te - Se;
+                T2 = std::min((-B - std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A), (-B + std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A));
+                T3 = T1;
+                T4 = planTime - 4 * T1 - 2 * T2;
+                T5 = T1;
+                T6 = T2;
+                T7 = T1;
+            }
+            else
+            {
+                // std::cout << "无加减速段,有匀速段 2 " << std::endl;
+                findCubicRoot();
+            }
+        }
+        else
+        {
+            std::cout << "SS 求解错误 1" << std::endl;
+        }
+    }
+    else
+    {
+        if ((4 * T1) < (planTime + deltaT))
+        {
+            // std::cout << "无加减速段,有匀速段 3 " << std::endl;
+            findCubicRoot();
+        }
+        else
+        {
+            std::cout << "SS 求解错误 2" << std::endl;
+        }
+    }
+
+    int totalNum = std::ceil((T1 + T2 + T3 + T4 + T5 + T6 + T7) / deltaT);
+    double q = q0;
+    double dq = 0;
+    double ddq = 0;
+    for (int num = 0; num <= totalNum; ++num)
+    {
+        double t = num * deltaT;
+        double detlaq;
+        double detladq;
+        if ((t >= 0) && (t < T1))
+        {
+            double nowt = t;
+            ddq = j1 * nowt;
+        }
+        else if ((t >= T1) && (t < (T1 + T2)))
+        {
+            ddq = acc1;
+        }
+        else if ((t >= (T1 + T2)) && (t < (T1 + T2 + T3)))
+        {
+            double nowt = t - T1 - T2;
+            ddq = acc1 + j2 * nowt;
+        }
+        else if ((t >= (T1 + T2 + T3)) && (t < (T1 + T2 + T3 + T4)))
+        {
+            ddq = 0;
+        }
+        else if ((t >= (T1 + T2 + T3 + T4)) && (t < (T1 + T2 + T3 + T4 + T5)))
+        {
+            double nowt = t - T1 - T2 - T3 - T4;
+            ddq = j3 * nowt;
+        }
+        else if ((t >= (T1 + T2 + T3 + T4 + T5)) && (t < (T1 + T2 + T3 + T4 + T5 + T6)))
+        {
+            ddq = acc2;
+        }
+        else if ((t >= (T1 + T2 + T3 + T4 + T5 + T6)) && (t < (T1 + T2 + T3 + T4 + T5 + T6 + T7)))
+        {
+            double nowt = t - T1 - T2 - T3 - T4 - T5 - T6;
+            ddq = acc2 + j4 * nowt;
+        }
+        if (num == totalNum)
+        {
+            q_d.push(qf);
+            dq_d.push(0);
+            ddq_d.push(0);
+        }
+        else
+        {
+            dq = dq + ddq * deltaT;
+            q = q + dq * deltaT;
+            q_d.push(q);
+            dq_d.push(dq);
+            ddq_d.push(ddq);
+        }
+    }
+}
+// SS规划：计算队列
+template <int _Dofs>
+bool calSSPlan(bool isCoordinated, double deltaT,
+               const Eigen::Matrix<double, _Dofs, 1> &vel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &maxJerk,
+               const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+               std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+{
+    double acc1[_Dofs] = {0.0};
+    double acc2[_Dofs] = {0.0};
+    double j1[_Dofs] = {0.0};
+    double j2[_Dofs] = {0.0};
+    double j3[_Dofs] = {0.0};
+    double j4[_Dofs] = {0.0};
+    double planTime = 0;
+    double maxPlanTime = 0;
+
+    Eigen::Matrix<double, _Dofs, 1> atuVel = vel;
+    for (int i = 0; i < _Dofs; i++)
+    {
+        if (!calSSPlanParam<_Dofs>(deltaT, q0[i], qf[i], atuVel[i], maxAcc[i], maxJerk[i], acc1[i], acc2[i], j1[i], j2[i], j3[i], j4[i], planTime))
+            return false;
+        if (i == 0 || maxPlanTime < planTime)
+            maxPlanTime = planTime;
+    }
+    std::cout << "maxPlanTime  " << maxPlanTime << std::endl;
+
+    for (int i = 0; i < _Dofs; i++)
+    {
+        calSSPlanQueue<_Dofs>(deltaT, q0[i], qf[i], atuVel[i], maxAcc[i], maxJerk[i], acc1[i], acc2[i], j1[i], j2[i], j3[i], j4[i], maxPlanTime, q_d[i], dq_d[i], ddq_d[i]);
+    }
+    std::cout << "--------------------------------------------" << std::endl;
+
+    return true;
+}
+
+// 五次多项式规划器
+template <int _Dofs>
+class QuinticPlanner : public Planner<_Dofs>
+{
+public:
+public:
+    QuinticPlanner(const QuinticPlanner &) = delete;
+    void operator=(const QuinticPlanner &) = delete;
+
+    QuinticPlanner();
+    ~QuinticPlanner();
+
+    void calPlanQueue(bool isCoordinated, double deltaT,
+                      const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
+                      const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                      std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
+};
+template <int _Dofs>
+QuinticPlanner<_Dofs>::~QuinticPlanner()
+{
+}
+template <int _Dofs>
+QuinticPlanner<_Dofs>::QuinticPlanner()
+{
+    std::cout << "[robotController] 设置规划器: QuinticPlanner" << std::endl;
+}
+template <int _Dofs>
+void QuinticPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
+                                         const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
+                                         const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                                         std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+{
+    calQuinticPlan(isCoordinated, deltaT, maxVel, maxAcc, q0, qf, q_d, dq_d, ddq_d);
+}
+
+// TVP规划器
+template <int _Dofs>
+class TVPPlanner : public Planner<_Dofs>
+{
+public:
+public:
+    TVPPlanner(const TVPPlanner &) = delete;
+    void operator=(const TVPPlanner &) = delete;
+
+    TVPPlanner();
+    ~TVPPlanner();
+
+    void calPlanQueue(bool isCoordinated, double deltaT,
+                      const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
+                      const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                      std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
+};
+template <int _Dofs>
+TVPPlanner<_Dofs>::~TVPPlanner()
+{
+}
+template <int _Dofs>
+TVPPlanner<_Dofs>::TVPPlanner()
+{
+    std::cout << "[robotController] 设置规划器: TVPPlanner" << std::endl;
+}
+template <int _Dofs>
+void TVPPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
+                                     const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
+                                     const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                                     std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+{
+    calTVPPlan(isCoordinated, deltaT, maxVel, maxAcc, q0, qf, dq0, q_d, dq_d, ddq_d);
+}
+
+// SS规划器
+template <int _Dofs>
+class SSPlanner : public Planner<_Dofs>
+{
+public:
+public:
+    SSPlanner(const SSPlanner &) = delete;
+    void operator=(const SSPlanner &) = delete;
+
+    SSPlanner();
+    ~SSPlanner();
+
+    void calPlanQueue(bool isCoordinated, double deltaT,
+                      const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &maxJerk,
+                      const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                      std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
+};
+template <int _Dofs>
+SSPlanner<_Dofs>::~SSPlanner()
+{
+}
+template <int _Dofs>
+SSPlanner<_Dofs>::SSPlanner()
+{
+    std::cout << "[robotController] 设置规划器: SSPlanner" << std::endl;
+}
+template <int _Dofs>
+void SSPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
+                                    const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &maxJerk,
+                                    const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
+                                    std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+{
+    calSSPlan(isCoordinated, deltaT, maxVel, maxAcc, maxJerk, q0, qf, dq0, q_d, dq_d, ddq_d);
+}
+
+// 工厂
+template <int _Dofs>
+bool newPlanner(std::unique_ptr<Planner<_Dofs>> &Planner, PlannerType plannerType)
+{
+    switch (plannerType)
+    {
+    case PlannerType::Quintic_:
+        Planner = std::make_unique<QuinticPlanner<_Dofs>>();
+        break;
+    case PlannerType::TVP_:
+        Planner = std::make_unique<TVPPlanner<_Dofs>>();
+        break;
+    case PlannerType::SS_:
+        Planner = std::make_unique<SSPlanner<_Dofs>>();
+        break;
+    default:
+        Planner = std::make_unique<TVPPlanner<_Dofs>>();
+        return false;
+        break;
     }
     return true;
 }

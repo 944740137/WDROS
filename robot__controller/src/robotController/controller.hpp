@@ -1,6 +1,6 @@
 // #pragma once
-#include "planner/planner.hpp"
 #include "controllerLaw/controllerLaw.hpp"
+#include "planner/planner.hpp"
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -28,12 +28,15 @@ namespace robot_controller
         double jogSpeed = 0; // 0-1
         double jogSpeed_d = 0;
 
-        // 规划参数
+        // 运行参数
         bool newPlan = false;
-        TaskSpace plannerTaskSpace = TaskSpace::jointSpace;
         Eigen::Matrix<double, _Dofs, 1> q_calQueue;
         double runSpeed = 0;
         double runSpeed_d = 0;
+
+        // 坐标系
+        TaskSpace runTaskSpace = TaskSpace::jointSpace;
+        TaskSpace runTaskSpace_d = TaskSpace::jointSpace;
 
         // 急停参数
         bool newStop = false;
@@ -60,8 +63,9 @@ namespace robot_controller
         ControllerParamBase<_Dofs> controllerParam;
 
         // 规划器
-        Planner plannerType = Planner::Quintic_;
-        Planner plannerType_d = Planner::Quintic_;
+        std::unique_ptr<Planner<_Dofs>> planner;
+        PlannerType plannerType = PlannerType::Quintic_;
+        PlannerType plannerType_d = PlannerType::Quintic_;
 
     public:
         Controller(const Controller &) = delete;
@@ -75,11 +79,13 @@ namespace robot_controller
         const std::string &getControllerLawName();
         void dynamicSetParameter();
         void changeControllerLaw(ControllerLawType type);
+        void changePlanner(PlannerType type);
         void initStateToMaster();
         void calRunQueue(my_robot::Robot<_Dofs> *robot);
         void calStopQueue(my_robot::Robot<_Dofs> *robot);
         void startMotion();
         void clearRunQueue();
+        void changeTaskSpace();
 
         // init
         void init(int recordPeriod, my_robot::Robot<_Dofs> *robot);
@@ -91,7 +97,7 @@ namespace robot_controller
         void updateStatus(my_robot::Robot<_Dofs> *robot);
         void calDesireNext(my_robot::Robot<_Dofs> *robot); // 计算下一个周期的期望
         void calError(my_robot::Robot<_Dofs> *robot);
-        void setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
+        void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
 
         //
         void recordData(my_robot::Robot<_Dofs> *robot);
@@ -126,9 +132,15 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::changeControllerLaw(ControllerLawType type)
     {
-        if (!newControllerLaw(controllerLaw, type, plannerTaskSpace))
+        if (!newControllerLaw(controllerLaw, type, runTaskSpace))
             printf("ControllerLaw create Error\n");
         dynamicSetParameter();
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::changePlanner(PlannerType type)
+    {
+        if (!newPlanner(this->planner, type))
+            printf("Planner create Error\n");
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::dynamicSetParameter()
@@ -153,33 +165,34 @@ namespace robot_controller
     {
         Eigen::Matrix<double, _Dofs, 1> velLimit = this->runSpeed * robot->getdqLimit(); // 这里的velLimit是速度
         Eigen::Matrix<double, _Dofs, 1> accLimit = robot->getddqLimit();
+        Eigen::Matrix<double, _Dofs, 1> jerkLimit = robot->getdddqLimit();
 
         // note: 显示指定模板类型
-
-        switch (this->plannerType)
-        {
-        case Planner::Quintic_:
-            std::cout << "[robotController] 五次多项式规划" << std::endl;
-            calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-                                  this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-            break;
-        case Planner::TVP_:
-            std::cout << "[robotController] TVP规划" << std::endl;
-            calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-                              this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-            break;
-        case Planner::SS_:
-            std::cout << "[robotController] SS规划" << std::endl;
-            calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-                              this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-            break;
-        default:
-            std::cout << "[robotController] Unknown planner type using calQuinticPlan!!!!!" << std::endl;
-            calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-                                  this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-            break;
-        }
-
+        this->planner->calPlanQueue(true, this->cycleTime, velLimit, accLimit, jerkLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+                                    this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        // switch (this->plannerType)
+        // {
+        // case PlannerType::Quintic_:
+        //     std::cout << "[robotController] 五次多项式规划" << std::endl;
+        //     calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+        //                           this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        //     break;
+        // case PlannerType::TVP_:
+        //     std::cout << "[robotController] TVP规划" << std::endl;
+        //     calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+        //                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        //     break;
+        // case PlannerType::SS_:
+        //     std::cout << "[robotController] SS规划" << std::endl;
+        //     calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+        //                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        //     break;
+        // default:
+        //     std::cout << "[robotController] Unknown planner type using calQuinticPlan!!!!!" << std::endl;
+        //     calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
+        //                           this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
+        //     break;
+        // }
         this->startMotion();
     }
     template <int _Dofs, typename pubDataType>
@@ -211,6 +224,12 @@ namespace robot_controller
             std::queue<double>().swap(ddq_dQueue[i]);
         }
     }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::changeTaskSpace()
+    {
+        if (this->controllerLaw.get() != nullptr)
+            this->controllerLaw->setTaskSpace(this->runTaskSpace);
+    }
 
     //******************************************************************init******************************************************************//
     // init
@@ -224,8 +243,8 @@ namespace robot_controller
         // tmp
         for (int i = 0; i < _Dofs; i++)
         {
-            controllerParam.jointParam1[i].value = 40;
-            controllerParam.jointParam2[i].value = 10;
+            controllerParam.jointParam1[i].value = 60;
+            controllerParam.jointParam2[i].value = 5;
         }
         for (int i = 0; i < 6; i++)
         {
@@ -247,6 +266,7 @@ namespace robot_controller
         this->controllerCommandBUff->runSign = false;
         this->controllerCommandBUff->newLimit = false;
         changeControllerLaw(this->controllerLawType);
+        changePlanner(this->plannerType);
     }
 
     //******************************************************************run******************************************************************//
@@ -307,7 +327,7 @@ namespace robot_controller
         }
         if (this->controllerCommandBUff->runSign) // 新的规划任务
         {
-            this->plannerTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
+            this->runTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
             for (int i = 0; i < _Dofs; i++)
             {
                 this->q_calQueue[i] = this->controllerCommandBUff->q_final[i] * M_PI / 180.0;
@@ -334,7 +354,16 @@ namespace robot_controller
         }
         if (this->plannerType != this->plannerType_d) // 切换规划器
         {
+            changePlanner(this->plannerType_d);
             this->plannerType = this->plannerType_d;
+        }
+        if (this->runTaskSpace != this->runTaskSpace_d) // 切换坐标系：关节/笛卡尔
+        {
+            if (this->controllerLaw.get() != nullptr)
+            {
+                this->controllerLaw->setTaskSpace(this->runTaskSpace_d);
+                this->runTaskSpace = this->runTaskSpace_d;
+            }
         }
         if (this->jogSpeed != this->jogSpeed_d) // 更改点动速度
         {
@@ -373,17 +402,18 @@ namespace robot_controller
         case RunStatus::run_:
             for (int i = 0; i < _Dofs; i++)
             {
+                if (q_dQueue[i].empty())
+                {
+                    this->q_hold = this->controllerLaw->q_d;
+                    this->nowControllerStatus = RunStatus::wait_;
+                    break;
+                }
                 this->controllerLaw->q_d[i] = q_dQueue[i].front();
                 this->controllerLaw->dq_d[i] = dq_dQueue[i].front();
                 this->controllerLaw->ddq_d[i] = ddq_dQueue[i].front();
                 q_dQueue[i].pop();
                 dq_dQueue[i].pop();
                 ddq_dQueue[i].pop();
-                if (q_dQueue[i].empty())
-                {
-                    this->q_hold = this->controllerLaw->q_d;
-                    this->nowControllerStatus = RunStatus::wait_;
-                }
             }
             break;
         default:
@@ -394,43 +424,58 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calError(my_robot::Robot<_Dofs> *robot)
     {
-
         if (controllerLaw.get() == nullptr)
             return;
-        // 关节误差与误差导数
-        this->controllerLaw->jointError = this->controllerLaw->q_d - robot->getq();
-        this->controllerLaw->djointError = this->controllerLaw->dq_d - robot->getdq();
 
-        // 笛卡尔位姿误差
-        Eigen::Quaterniond orientation = robot->getOrientation();
-        this->controllerLaw->cartesianError.head(3) = this->controllerLaw->position_d - robot->getPosition();
-        if (this->controllerLaw->orientation_d.coeffs().dot(orientation.coeffs()) < 0.0)
+        switch (this->runTaskSpace)
         {
-            orientation.coeffs() << -orientation.coeffs();
+        case TaskSpace::jointSpace:
+        {
+            // 关节误差与误差导数
+            this->controllerLaw->jointError = this->controllerLaw->q_d - robot->getq();
+            this->controllerLaw->djointError = this->controllerLaw->dq_d - robot->getdq();
+            break;
         }
-        Eigen::Quaterniond error_quaternion(orientation.inverse() * this->controllerLaw->orientation_d);
-        this->controllerLaw->cartesianError.tail(3) << error_quaternion.x(), error_quaternion.y(), error_quaternion.z();
-        this->controllerLaw->cartesianError.tail(3) << robot->getT().rotation() * this->controllerLaw->cartesianError.tail(3);
+        case TaskSpace::cartesianSpace:
+        {
+            // 笛卡尔位姿误差
+            Eigen::Quaterniond orientation = robot->getOrientation();
+            this->controllerLaw->cartesianError.head(3) = this->controllerLaw->position_d - robot->getPosition();
+            if (this->controllerLaw->orientation_d.coeffs().dot(orientation.coeffs()) < 0.0)
+            {
+                orientation.coeffs() << -orientation.coeffs();
+            }
+            Eigen::Quaterniond error_quaternion(orientation.inverse() * this->controllerLaw->orientation_d);
+            this->controllerLaw->cartesianError.tail(3) << error_quaternion.x(), error_quaternion.y(), error_quaternion.z();
+            this->controllerLaw->cartesianError.tail(3) << robot->getT().rotation() * this->controllerLaw->cartesianError.tail(3);
 
-        // 笛卡尔位姿误差导数
-        Eigen::Quaterniond dorientation = robot->getdOrientation();
-        this->controllerLaw->dcartesianError.head(3) = this->controllerLaw->dposition_d - robot->getdPosition();
-        if (this->controllerLaw->dorientation_d.coeffs().dot(dorientation.coeffs()) < 0.0)
-        {
-            dorientation.coeffs() << -dorientation.coeffs();
+            // 笛卡尔位姿误差导数
+            Eigen::Quaterniond dorientation = robot->getdOrientation();
+            this->controllerLaw->dcartesianError.head(3) = this->controllerLaw->dposition_d - robot->getdPosition();
+            if (this->controllerLaw->dorientation_d.coeffs().dot(dorientation.coeffs()) < 0.0)
+            {
+                dorientation.coeffs() << -dorientation.coeffs();
+            }
+            Eigen::Quaterniond derror_quaternion(dorientation.inverse() * this->controllerLaw->dorientation_d);
+            this->controllerLaw->cartesianError.tail(3) << derror_quaternion.x(), derror_quaternion.y(), derror_quaternion.z();
+            this->controllerLaw->cartesianError.tail(3) << robot->getT().rotation() * this->controllerLaw->cartesianError.tail(3);
+            break;
         }
-        Eigen::Quaterniond derror_quaternion(dorientation.inverse() * this->controllerLaw->dorientation_d);
-        this->controllerLaw->cartesianError.tail(3) << derror_quaternion.x(), derror_quaternion.y(), derror_quaternion.z();
-        this->controllerLaw->cartesianError.tail(3) << robot->getT().rotation() * this->controllerLaw->cartesianError.tail(3);
+        default:
+        {
+            printf("calError error\n");
+            break;
+        }
+        }
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d)
+    void Controller<_Dofs, pubDataType>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d)
     {
         if (controllerLaw.get() != nullptr)
-            controllerLaw->setControllerLaw(robot, tau_d);
+            controllerLaw->setU(robot, tau_d);
     }
 
-    //
+    //******************************************************************ROS******************************************************************//
     // ROS
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::recordData(my_robot::Robot<_Dofs> *robot)
@@ -496,13 +541,13 @@ namespace robot_controller
             return;
         for (int i = 0; i < _Dofs; i++)
         {
-            param_debug.jointError[i] = this->controllerLaw->jointError[i];
-            param_debug.q[i] = robot->getq()[i];
-            param_debug.dq[i] = robot->getdq()[i];
+            param_debug.jointError[i] = this->controllerLaw->jointError[i] * 180.0 / M_PI;
+            param_debug.q[i] = robot->getq()[i] * 180.0 / M_PI;
+            param_debug.dq[i] = robot->getdq()[i] * 180.0 / M_PI;
 
-            param_debug.q_d[i] = this->controllerLaw->q_d[i];
-            param_debug.dq_d[i] = this->controllerLaw->dq_d[i];
-            param_debug.ddq_d[i] = this->controllerLaw->ddq_d[i];
+            param_debug.q_d[i] = this->controllerLaw->q_d[i] * 180.0 / M_PI;
+            param_debug.dq_d[i] = this->controllerLaw->dq_d[i] * 180.0 / M_PI;
+            param_debug.ddq_d[i] = this->controllerLaw->ddq_d[i] * 180.0 / M_PI;
 
             param_debug.tau_d[i] = this->controllerLaw->tau_d[i];
         }
@@ -514,8 +559,8 @@ namespace robot_controller
         {
             param_debug.position[i] = robot->getPosition()[i];
             param_debug.position_d[i] = this->controllerLaw->position_d[i];
-            param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
-            param_debug.orientation_d[i] = this->controllerLaw->orientation_d.toRotationMatrix().eulerAngles(2, 1, 0)[i];
+            param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
+            param_debug.orientation_d[i] = this->controllerLaw->orientation_d.toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
         }
     }
 };

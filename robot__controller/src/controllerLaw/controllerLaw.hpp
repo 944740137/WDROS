@@ -58,7 +58,8 @@ public:
     ControllerLaw(TaskSpace createTaskSpace, std::string createControllerLawName);
     virtual ~ControllerLaw();
 
-    virtual void setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d) = 0;
+    virtual void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d) = 0;
+    virtual void setTaskSpace(TaskSpace newTaskSpace);
     virtual void dynamicSetParameter(const ControllerParamBase<_Dofs> &config, unsigned int time) = 0;
     virtual void controllerParamRenew(double filterParams) = 0;
 };
@@ -87,7 +88,11 @@ ControllerLaw<_Dofs>::ControllerLaw(TaskSpace createTaskSpace, std::string creat
 {
     // 全部初始化为0
 }
-
+template <int _Dofs>
+void ControllerLaw<_Dofs>::setTaskSpace(TaskSpace newTaskSpace)
+{
+    this->taskSpace = newTaskSpace;
+}
 //
 //
 // 计算力矩控制器
@@ -117,7 +122,7 @@ public:
     ~ComputedTorqueMethod();
     explicit ComputedTorqueMethod(TaskSpace taskSpace);
 
-    void setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
+    void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
 
     void dynamicSetParameter(const ControllerParamBase<_Dofs> &config, unsigned int time);
     void controllerParamRenew(double filterParams);
@@ -140,7 +145,7 @@ ComputedTorqueMethod<_Dofs>::ComputedTorqueMethod(TaskSpace taskSpace) : Control
     std::cout << "[robotController] 设置控制律: " << this->controllerLawName << std::endl;
 }
 template <int _Dofs>
-void ComputedTorqueMethod<_Dofs>::setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
+void ComputedTorqueMethod<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
 {
     if (this->taskSpace == jointSpace)
     {
@@ -223,7 +228,7 @@ public:
     ~Backstepping();
     explicit Backstepping(TaskSpace taskSpace);
 
-    void setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
+    void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
 
     void dynamicSetParameter(const ControllerParamBase<_Dofs> &config, unsigned int time);
     void controllerParamRenew(double filterParams);
@@ -250,7 +255,7 @@ Backstepping<_Dofs>::Backstepping(TaskSpace taskSpace) : ControllerLaw<_Dofs>(ta
     std::cout << "[robotController] 设置控制律: " << this->controllerLawName << std::endl;
 }
 template <int _Dofs>
-void Backstepping<_Dofs>::setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
+void Backstepping<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
 {
     // note: 父类是抽象模板类，子类使用其成员需显式指定：this->或base::
     if (this->taskSpace == jointSpace)
@@ -333,7 +338,7 @@ public:
     ~PD();
     explicit PD(TaskSpace taskSpace);
 
-    void setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
+    void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d);
 
     void dynamicSetParameter(const ControllerParamBase<_Dofs> &config, unsigned int time);
     void controllerParamRenew(double filterParams);
@@ -356,7 +361,7 @@ PD<_Dofs>::PD(TaskSpace taskSpace) : ControllerLaw<_Dofs>(taskSpace, "PD"),
     std::cout << "[robotController] 设置控制律: " << this->controllerLawName << std::endl;
 }
 template <int _Dofs>
-void PD<_Dofs>::setControllerLaw(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
+void PD<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
 {
     if (this->taskSpace == jointSpace)
     {
@@ -404,13 +409,10 @@ void PD<_Dofs>::controllerParamRenew(double filterParams)
     this->cartesianKv = filterParams * this->cartesianKv_d + (1.0 - filterParams) * this->cartesianKv;
 }
 
-//
-
+// 工厂
 template <int _Dofs>
 bool newControllerLaw(std::unique_ptr<ControllerLaw<_Dofs>> &controllerLaw, ControllerLawType controllerLawType, TaskSpace taskSpace)
 {
-    if (controllerLaw != nullptr)
-        controllerLaw.reset(nullptr);
     switch (controllerLawType)
     {
     case ControllerLawType::ComputedTorqueMethod_:

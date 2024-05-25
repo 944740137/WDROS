@@ -45,15 +45,15 @@ void pandaRun(const Eigen::Matrix<double, DIM, 1> &q, const Eigen::Matrix<double
     // 控制器更新时间
     pController->updateTime();
 
-    //  通信，读取缓存
+    // 通信，读取缓存
     pController->communication(pPanda);
-    //  根据缓存更新状态
+    // 根据缓存更新状态
     pController->updateStatus(pPanda);
 
     // 根据队列计算当前期望和误差计算输出力矩
     pController->calDesireNext(pPanda); // 取出队头作为当前期望
     pController->calError(pPanda);      // 误差
-    pController->setControllerLaw(pPanda, tau_d);
+    pController->setU(pPanda, tau_d);
 
     // 调节控制律参数 目标参数由回调函数设置
     pController->controllerParamRenew();
