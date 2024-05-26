@@ -45,10 +45,14 @@ namespace robot_controller
         RunStatus nowControllerStatus = RunStatus::wait_; // 当前状态
 
         // 运行队列
-        std::vector<std::queue<double>> q_dQueue{_Dofs};
-        std::vector<std::queue<double>> dq_dQueue{_Dofs};
-        std::vector<std::queue<double>> ddq_dQueue{_Dofs};
+        std::vector<std::queue<double>> q_dRunQueue{_Dofs};
+        std::vector<std::queue<double>> dq_dRunQueue{_Dofs};
+        std::vector<std::queue<double>> ddq_dRunQueue{_Dofs};
 
+        // 急停队列
+        std::vector<std::queue<double>> q_dStopQueue{_Dofs};
+        std::vector<std::queue<double>> dq_dStopQueue{_Dofs};
+        std::vector<std::queue<double>> ddq_dStopQueue{_Dofs};
         // 通讯
         bool connectStatus = false;
         Communication communicationModel;
@@ -80,12 +84,14 @@ namespace robot_controller
         void dynamicSetParameter();
         void changeControllerLaw(ControllerLawType type);
         void changePlanner(PlannerType type);
+        void changeTaskSpace();
         void initStateToMaster();
         void calRunQueue(my_robot::Robot<_Dofs> *robot);
         void calStopQueue(my_robot::Robot<_Dofs> *robot);
         void startMotion();
-        void clearRunQueue();
-        void changeTaskSpace();
+        void stopMotion();
+        void clearMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
+        bool checkMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
 
         // init
         void init(int recordPeriod, my_robot::Robot<_Dofs> *robot);
@@ -161,6 +167,37 @@ namespace robot_controller
         this->nowControllerStatus = RunStatus::run_; // 开始运动
     }
     template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::stopMotion()
+    {
+        this->nowControllerStatus = RunStatus::stop_; // 开始停止
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::clearMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+    {
+        for (int i = 0; i < _Dofs; i++)
+        {
+            std::queue<double>().swap(q_d[i]);
+            std::queue<double>().swap(dq_d[i]);
+            std::queue<double>().swap(ddq_d[i]);
+        }
+    }
+    template <int _Dofs, typename pubDataType>
+    bool Controller<_Dofs, pubDataType>::checkMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
+    {
+        int size = 0;
+        for (int i = 0; i < _Dofs; i++)
+        {
+            size = size + q_d[i].size();
+        }
+        if ((size / _Dofs) != q_d[0].size())
+        {
+            this->clearMotionQueue(q_d, dq_d, ddq_d);
+            std::cout << "[robotController] 队列长度不一致 清空处理" << std::endl;
+            return false;
+        }
+        return true;
+    }
+    template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calRunQueue(my_robot::Robot<_Dofs> *robot)
     {
         Eigen::Matrix<double, _Dofs, 1> velLimit = this->runSpeed * robot->getdqLimit(); // 这里的velLimit是速度
@@ -168,37 +205,20 @@ namespace robot_controller
         Eigen::Matrix<double, _Dofs, 1> jerkLimit = robot->getdddqLimit();
 
         // note: 显示指定模板类型
-        this->planner->calPlanQueue(true, this->cycleTime, velLimit, accLimit, jerkLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-                                    this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-        // switch (this->plannerType)
-        // {
-        // case PlannerType::Quintic_:
-        //     std::cout << "[robotController] 五次多项式规划" << std::endl;
-        //     calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-        //                           this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-        //     break;
-        // case PlannerType::TVP_:
-        //     std::cout << "[robotController] TVP规划" << std::endl;
-        //     calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-        //                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-        //     break;
-        // case PlannerType::SS_:
-        //     std::cout << "[robotController] SS规划" << std::endl;
-        //     calTVPPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-        //                       this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-        //     break;
-        // default:
-        //     std::cout << "[robotController] Unknown planner type using calQuinticPlan!!!!!" << std::endl;
-        //     calQuinticPlan<_Dofs>(true, this->cycleTime, velLimit, accLimit, robot->getq(), this->q_calQueue,
-        //                           this->q_dQueue, this->dq_dQueue, this->ddq_dQueue);
-        //     break;
-        // }
-        this->startMotion();
+        if (!this->planner->calPlanQueue(true, this->cycleTime, velLimit, accLimit, jerkLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+                                         this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue))
+        {
+            this->clearMotionQueue(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
+            return;
+        }
+        if (!this->checkMotionQueue(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue))
+            this->clearMotionQueue(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
+        else
+            this->startMotion();
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calStopQueue(my_robot::Robot<_Dofs> *robot)
     {
-        std::cout << "[robotController] 急停规划" << std::endl;
         Eigen::Matrix<double, _Dofs, 1> maxAcc = robot->getddqLimit();
         Eigen::Matrix<double, _Dofs, 1> maxJerk = robot->getdddqLimit();
         Eigen::Matrix<double, _Dofs, 1> q = Eigen::Matrix<double, _Dofs, 1>::Zero();
@@ -206,22 +226,22 @@ namespace robot_controller
         Eigen::Matrix<double, _Dofs, 1> ddq = Eigen::Matrix<double, _Dofs, 1>::Zero();
         for (int i = 0; i < _Dofs; i++)
         {
-            q[i] = this->q_dQueue[i].front();
-            dq[i] = this->dq_dQueue[i].front();
-            ddq[i] = this->ddq_dQueue[i].front();
+            q[i] = this->q_dRunQueue[i].front();
+            dq[i] = this->dq_dRunQueue[i].front();
+            ddq[i] = this->ddq_dRunQueue[i].front();
         }
-        this->clearRunQueue();
-        if (!calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, q_dQueue, dq_dQueue, ddq_dQueue))
-            std::cout << "calStopPlan error" << std::endl;
-    }
-    template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::clearRunQueue()
-    {
-        for (int i = 0; i < _Dofs; i++)
+        if (!calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue))
         {
-            std::queue<double>().swap(q_dQueue[i]);
-            std::queue<double>().swap(dq_dQueue[i]);
-            std::queue<double>().swap(ddq_dQueue[i]);
+            this->clearMotionQueue(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue);
+            return;
+        }
+
+        if (!this->checkMotionQueue(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue))
+            this->clearMotionQueue(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue);
+        else
+        {
+            this->clearMotionQueue(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
+            this->stopMotion();
         }
     }
     template <int _Dofs, typename pubDataType>
@@ -391,7 +411,6 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calDesireNext(my_robot::Robot<_Dofs> *robot)
     {
-
         switch (this->nowControllerStatus)
         {
         case RunStatus::wait_:
@@ -402,18 +421,35 @@ namespace robot_controller
         case RunStatus::run_:
             for (int i = 0; i < _Dofs; i++)
             {
-                if (q_dQueue[i].empty())
+
+                this->controllerLaw->q_d[i] = q_dRunQueue[i].front();
+                this->controllerLaw->dq_d[i] = dq_dRunQueue[i].front();
+                this->controllerLaw->ddq_d[i] = ddq_dRunQueue[i].front();
+                q_dRunQueue[i].pop();
+                dq_dRunQueue[i].pop();
+                ddq_dRunQueue[i].pop();
+                if (q_dRunQueue[i].empty())
                 {
                     this->q_hold = this->controllerLaw->q_d;
                     this->nowControllerStatus = RunStatus::wait_;
-                    break;
                 }
-                this->controllerLaw->q_d[i] = q_dQueue[i].front();
-                this->controllerLaw->dq_d[i] = dq_dQueue[i].front();
-                this->controllerLaw->ddq_d[i] = ddq_dQueue[i].front();
-                q_dQueue[i].pop();
-                dq_dQueue[i].pop();
-                ddq_dQueue[i].pop();
+            }
+            break;
+        case RunStatus::stop_:
+            for (int i = 0; i < _Dofs; i++)
+            {
+
+                this->controllerLaw->q_d[i] = q_dStopQueue[i].front();
+                this->controllerLaw->dq_d[i] = dq_dStopQueue[i].front();
+                this->controllerLaw->ddq_d[i] = ddq_dStopQueue[i].front();
+                q_dStopQueue[i].pop();
+                dq_dStopQueue[i].pop();
+                ddq_dStopQueue[i].pop();
+                if (q_dStopQueue[i].empty())
+                {
+                    this->q_hold = this->controllerLaw->q_d;
+                    this->nowControllerStatus = RunStatus::wait_;
+                }
             }
             break;
         default:

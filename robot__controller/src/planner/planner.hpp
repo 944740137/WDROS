@@ -4,6 +4,9 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <complex.h>
+
+constexpr double param = 0.0000001; // 绝对值小于它时置为0，避免出现根号负数
+
 // 关节规划器
 template <int _Dofs>
 class Planner
@@ -16,7 +19,7 @@ public:
     Planner();
     virtual ~Planner();
 
-    virtual void calPlanQueue(bool isCoordinated, double deltaT,
+    virtual bool calPlanQueue(bool isCoordinated, double deltaT,
                               const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
                               const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                               std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d) = 0;
@@ -33,7 +36,7 @@ Planner<_Dofs>::Planner()
 
 // 五次多项式规划：计算时间
 template <int _Dofs>
-void calQuinticPlanTime(bool isCoordinated, double *T,
+bool calQuinticPlanTime(bool isCoordinated, double *T,
                         const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc,
                         const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf)
 {
@@ -53,10 +56,11 @@ void calQuinticPlanTime(bool isCoordinated, double *T,
             T[i] = Tf;
         }
     }
+    return true;
 }
 // 五次多项式规划：计算队列
 template <int _Dofs>
-void calQuinticPlan(bool isCoordinated, double deltaT,
+bool calQuinticPlan(bool isCoordinated, double deltaT,
                     const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc,
                     const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf,
                     std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d,
@@ -94,6 +98,7 @@ void calQuinticPlan(bool isCoordinated, double deltaT,
             ddq_d[i].push(2 * a2 + 6 * a3 * t + 12 * a4 * pow(t, 2) + 20 * a5 * pow(t, 3));
         }
     }
+    return true;
 }
 
 //***********************************************************************************************************************************//
@@ -119,6 +124,13 @@ bool calStopPlanParam(double deltaT, double jerk, double dq0, double ddq0,
 
     if ((maxAcc * ddq0 > 0) && std::fabs(S) <= (std::fabs(ddq0 * ddq0) / (2 * jerk1)))
     {
+        std::cout << "jerk " << jerk << std::endl;
+        std::cout << "dq0 " << dq0 << std::endl;
+        std::cout << "ddq0 " << ddq0 << std::endl;
+        std::cout << "S " << S << std::endl;
+        std::cout << "maxAcc " << maxAcc << std::endl;
+        std::cout << "ddq0 " << ddq0 << std::endl;
+        std::cout << "jerk1 " << jerk1 << std::endl;
         return false;
     }
 
@@ -147,7 +159,7 @@ bool calStopPlanParam(double deltaT, double jerk, double dq0, double ddq0,
 }
 // 急停规划：固定时间规划
 template <int _Dofs>
-void calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double maxPlanTime,
+bool calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double maxPlanTime,
                       double jerk1, double jerk2, double maxAcc,
                       std::queue<double> &q_d, std::queue<double> &dq_d, std::queue<double> &ddq_d)
 {
@@ -167,6 +179,9 @@ void calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double 
     double A = jerk1 - jerk2;
     double B = (2 * jerk1 * jerk2 * maxPlanTime + 2 * jerk2 * ddq0);
     double C = -2 * jerk1 * jerk2 * S - jerk2 * ddq0 * ddq0;
+    double delta = B * B - 4 * A * C;
+    if (std::fabs(delta) < param)
+        delta = 0;
     double Acc;
     if (A == 0)
     {
@@ -174,7 +189,7 @@ void calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double 
     }
     else
     {
-        Acc = (-B - std::sqrt(B * B - 4 * A * C)) / (2 * A);
+        Acc = (-B - std::sqrt(delta)) / (2 * A);
     }
 
     double S1 = (Acc * Acc - ddq0 * ddq0) / (2 * jerk1);
@@ -227,6 +242,7 @@ void calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double 
             ddq_d.push(0.0);
         }
     }
+    return true;
 }
 // 急停规划：计算队列
 template <int _Dofs>
@@ -243,7 +259,10 @@ bool calStopPlan(bool isCoordinated, double deltaT, Eigen::Matrix<double, _Dofs,
     {
         maxAcc[i] = ddq[i];
         if (!calStopPlanParam<_Dofs>(deltaT, dddq[i], dq0[i], ddq0[i], jerk1[i], jerk2[i], maxAcc[i], planTime))
+        {
+            std::cout << "急停规划失败 0x2405261439" << std::endl;
             return false;
+        }
         if (i == 0 || maxPlanTime < planTime)
             maxPlanTime = planTime;
     }
@@ -277,6 +296,13 @@ bool calTVPPlanParam(double deltaT, double q0, double qf, double dq0, double max
 
     if ((vel * dq0 > 0) && std::fabs(S) <= (std::fabs(dq0 * dq0) / (2 * acc1)))
     {
+        std::cout << "q0 " << q0 << std::endl;
+        std::cout << "qf " << qf << std::endl;
+        std::cout << "S " << S << std::endl;
+        std::cout << "dq0 " << dq0 << std::endl;
+        std::cout << "maxAcc " << maxAcc << std::endl;
+        std::cout << "vel " << vel << std::endl;
+        std::cout << "acc1 " << acc1 << std::endl;
         return false;
     }
 
@@ -300,11 +326,12 @@ bool calTVPPlanParam(double deltaT, double q0, double qf, double dq0, double max
     double T2 = std::fabs(S2 / vel);
     double T3 = std::fabs((0 - vel) / (acc2));
     planTime = T1 + T2 + T3;
+
     return true;
 }
 // TVP规划：固定时间规划
 template <int _Dofs>
-void calTVPPlanQueue(double deltaT, double q0, double qf, double dq0, double maxPlanTime,
+bool calTVPPlanQueue(double deltaT, double q0, double qf, double dq0, double maxPlanTime,
                      double acc1, double acc2, double vel,
                      std::queue<double> &q_d, std::queue<double> &dq_d, std::queue<double> &ddq_d)
 {
@@ -320,13 +347,16 @@ void calTVPPlanQueue(double deltaT, double q0, double qf, double dq0, double max
     double A = acc1 - acc2;
     double B = (2 * acc1 * acc2 * maxPlanTime + 2 * acc2 * dq0);
     double C = -2 * acc1 * acc2 * S - acc2 * dq0 * dq0;
+    double delta = B * B - 4 * A * C;
+    if (std::fabs(delta) < param)
+        delta = 0;
     if (A == 0)
     {
         vel = -C / B;
     }
     else
     {
-        vel = (-B - std::sqrt(B * B - 4 * A * C)) / (2 * A);
+        vel = (-B - std::sqrt(delta)) / (2 * A);
     }
 
     double S1 = (vel * vel - dq0 * dq0) / (2 * acc1);
@@ -376,6 +406,7 @@ void calTVPPlanQueue(double deltaT, double q0, double qf, double dq0, double max
             ddq_d.push(0.0);
         }
     }
+    return true;
 }
 // TVP规划：计算队列
 template <int _Dofs>
@@ -393,7 +424,10 @@ bool calTVPPlan(bool isCoordinated, double deltaT,
     for (int i = 0; i < _Dofs; i++)
     {
         if (!calTVPPlanParam<_Dofs>(deltaT, q0[i], qf[i], dq0[i], maxAcc[i], atuVel[i], acc1[i], acc2[i], planTime))
+        {
+            std::cout << "TVP规划失败 0x2405261351" << std::endl;
             return false;
+        }
         if (i == 0 || maxPlanTime < planTime)
             maxPlanTime = planTime;
     }
@@ -521,7 +555,7 @@ bool calSSPlanParam(double deltaT, double q0, double qf, double vel, double maxA
 }
 // SS规划：固定时间规划
 template <int _Dofs>
-void calSSPlanQueue(double deltaT, double q0, double qf, double vel, double maxAcc, double maxJerk,
+bool calSSPlanQueue(double deltaT, double q0, double qf, double vel, double maxAcc, double maxJerk,
                     double &acc1, double &acc2, double &j1, double &j2, double &j3, double &j4, double &planTime,
                     std::queue<double> &q_d, std::queue<double> &dq_d, std::queue<double> &ddq_d)
 {
@@ -552,7 +586,7 @@ void calSSPlanQueue(double deltaT, double q0, double qf, double vel, double maxA
         T1 = 0;
         for (int i = 0; i < 3; ++i)
         {
-            if (std::fabs(x[i].imag()) <= 0.000000001 && x[i].real() > 0)
+            if (std::fabs(x[i].imag()) <= param && x[i].real() > 0)
             {
                 if ((T1 != 0 && x[i].real() < T1) || T1 == 0)
                 {
@@ -671,6 +705,7 @@ void calSSPlanQueue(double deltaT, double q0, double qf, double vel, double maxA
             ddq_d.push(ddq);
         }
     }
+    return true;
 }
 // SS规划：计算队列
 template <int _Dofs>
@@ -696,13 +731,11 @@ bool calSSPlan(bool isCoordinated, double deltaT,
         if (i == 0 || maxPlanTime < planTime)
             maxPlanTime = planTime;
     }
-    std::cout << "maxPlanTime  " << maxPlanTime << std::endl;
 
     for (int i = 0; i < _Dofs; i++)
     {
         calSSPlanQueue<_Dofs>(deltaT, q0[i], qf[i], atuVel[i], maxAcc[i], maxJerk[i], acc1[i], acc2[i], j1[i], j2[i], j3[i], j4[i], maxPlanTime, q_d[i], dq_d[i], ddq_d[i]);
     }
-    std::cout << "--------------------------------------------" << std::endl;
 
     return true;
 }
@@ -719,7 +752,7 @@ public:
     QuinticPlanner();
     ~QuinticPlanner();
 
-    void calPlanQueue(bool isCoordinated, double deltaT,
+    bool calPlanQueue(bool isCoordinated, double deltaT,
                       const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
                       const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                       std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
@@ -734,12 +767,12 @@ QuinticPlanner<_Dofs>::QuinticPlanner()
     std::cout << "[robotController] 设置规划器: QuinticPlanner" << std::endl;
 }
 template <int _Dofs>
-void QuinticPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
+bool QuinticPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
                                          const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
                                          const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                                          std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
-    calQuinticPlan(isCoordinated, deltaT, maxVel, maxAcc, q0, qf, q_d, dq_d, ddq_d);
+    return calQuinticPlan(isCoordinated, deltaT, maxVel, maxAcc, q0, qf, q_d, dq_d, ddq_d);
 }
 
 // TVP规划器
@@ -754,7 +787,7 @@ public:
     TVPPlanner();
     ~TVPPlanner();
 
-    void calPlanQueue(bool isCoordinated, double deltaT,
+    bool calPlanQueue(bool isCoordinated, double deltaT,
                       const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
                       const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                       std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
@@ -769,12 +802,12 @@ TVPPlanner<_Dofs>::TVPPlanner()
     std::cout << "[robotController] 设置规划器: TVPPlanner" << std::endl;
 }
 template <int _Dofs>
-void TVPPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
+bool TVPPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
                                      const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &jerk,
                                      const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                                      std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
-    calTVPPlan(isCoordinated, deltaT, maxVel, maxAcc, q0, qf, dq0, q_d, dq_d, ddq_d);
+    return calTVPPlan(isCoordinated, deltaT, maxVel, maxAcc, q0, qf, dq0, q_d, dq_d, ddq_d);
 }
 
 // SS规划器
@@ -789,7 +822,7 @@ public:
     SSPlanner();
     ~SSPlanner();
 
-    void calPlanQueue(bool isCoordinated, double deltaT,
+    bool calPlanQueue(bool isCoordinated, double deltaT,
                       const Eigen::Matrix<double, _Dofs, 1> &maxVel, const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &maxJerk,
                       const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                       std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
@@ -804,12 +837,12 @@ SSPlanner<_Dofs>::SSPlanner()
     std::cout << "[robotController] 设置规划器: SSPlanner" << std::endl;
 }
 template <int _Dofs>
-void SSPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
+bool SSPlanner<_Dofs>::calPlanQueue(bool isCoordinated, double deltaT, const Eigen::Matrix<double, _Dofs, 1> &maxVel,
                                     const Eigen::Matrix<double, _Dofs, 1> &maxAcc, const Eigen::Matrix<double, _Dofs, 1> &maxJerk,
                                     const Eigen::Matrix<double, _Dofs, 1> &q0, const Eigen::Matrix<double, _Dofs, 1> &qf, const Eigen::Matrix<double, _Dofs, 1> &dq0,
                                     std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
 {
-    calSSPlan(isCoordinated, deltaT, maxVel, maxAcc, maxJerk, q0, qf, dq0, q_d, dq_d, ddq_d);
+    return calSSPlan(isCoordinated, deltaT, maxVel, maxAcc, maxJerk, q0, qf, dq0, q_d, dq_d, ddq_d);
 }
 
 // 工厂
