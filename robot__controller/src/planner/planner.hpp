@@ -497,7 +497,10 @@ bool calSSPlanParam(double deltaT, double q0, double qf, double vel, double maxA
                 double A = (1.0 / 2.0) * acc1;
                 double B = (1.0 / 2.0) * j1 * std::pow(T1, 2) + T3 * acc1;
                 double C = (1.0 / 2.0) * j1 * std::pow(T1, 2) * T3 - Se;
-                T2 = std::fabs(std::max((-B - std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A), (-B + std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A)));
+                double delta = B * B - 4 * A * C;
+                if (std::fabs(delta) < param)
+                    delta = 0;
+                T2 = std::fabs(std::max((-B - std::sqrt(delta)) / (2 * A), (-B + std::sqrt(delta)) / (2 * A)));
                 T4 = 0;
                 T5 = T3;
                 T6 = T2;
@@ -618,7 +621,10 @@ bool calSSPlanQueue(double deltaT, double q0, double qf, double vel, double maxA
                 double A = -acc1;
                 double B = j1 * std::pow(T1, 2) + acc1 * Te;
                 double C = j1 * std::pow(T1, 3) + acc1 * T1 * Te - Se;
-                T2 = std::min((-B - std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A), (-B + std::sqrt(std::pow(B, 2) - 4 * A * C)) / (2 * A));
+                double delta = B * B - 4 * A * C;
+                if (std::fabs(delta) < param)
+                    delta = 0;
+                T2 = std::min((-B - std::sqrt(delta)) / (2 * A), (-B + std::sqrt(delta)) / (2 * A));
                 T3 = T1;
                 T4 = planTime - 4 * T1 - 2 * T2;
                 T5 = T1;
