@@ -102,7 +102,6 @@ bool calQuinticPlan(bool isCoordinated, double deltaT,
 }
 
 //***********************************************************************************************************************************//
-
 // 急停规划：最短时间规划
 template <int _Dofs>
 bool calStopPlanParam(double deltaT, double jerk, double dq0, double ddq0,
@@ -201,6 +200,7 @@ bool calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double 
     double T3 = std::fabs((0 - Acc) / jerk2);
     double q = q0;
     int totalNum = std::ceil((T1 + T2 + T3) / deltaT);
+
     for (int num = 0; num <= totalNum; ++num)
     {
         double t = num * deltaT;

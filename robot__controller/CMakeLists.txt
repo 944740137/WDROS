@@ -80,6 +80,7 @@ add_library(robot_controller
   src/communication/communication.cpp
   src/robotController/pandaController.cpp
   src/rosController/pandaRosController.cpp
+  src/planner/jogPlanner.cpp
 )
 
 
