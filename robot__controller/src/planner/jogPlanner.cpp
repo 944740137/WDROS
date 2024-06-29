@@ -16,8 +16,7 @@ void calStopTAP(double vel, double maxAcc, double maxJerk, double &t1, double &t
     }
     t3 = t1;
 }
-bool calJogMovePlan(bool flag, double deltaT, int dir,
-                    double maxJerk, double maxAcc, double maxVel, // vel是带百分比系数的
+bool calJogMovePlan(bool flag, double deltaT, int dir, double maxJerk, double maxAcc, double maxVel, // vel是带百分比系数的
                     double &q_d, double &dq_d, double &ddq_d)
 {
     static double jogTime = 0;
@@ -52,8 +51,7 @@ bool calJogMovePlan(bool flag, double deltaT, int dir,
     return true;
 }
 
-bool calJogStopPlan(bool flag, double deltaT, double dq0, double ddq0,
-                    double maxJerk, double maxAcc, // vel是带百分比系数的
+bool calJogStopPlan(bool flag, double deltaT, double maxJerk, double maxAcc, // vel是带百分比系数的
                     double &q_d, double &dq_d, double &ddq_d)
 {
     static double jogTime = 0;
@@ -67,15 +65,15 @@ bool calJogStopPlan(bool flag, double deltaT, double dq0, double ddq0,
     {
         jogTime = 0;
         sign = (dq_d > 0) ? 1 : -1;
-        if (ddq0 == 0)
+        if (ddq_d == 0)
         {
             t0 = 0;
-            calStopTAP(dq0, maxAcc, maxJerk, t1, t2, t3);
+            calStopTAP(dq_d, maxAcc, maxJerk, t1, t2, t3);
             AccFlag = false;
         }
         else
         {
-            t0 = std::fabs(ddq0 / maxJerk);
+            t0 = std::fabs(ddq_d / maxJerk);
             AccFlag = true;
         }
     }

@@ -1,14 +1,11 @@
 // #pragma once
 #include "controllerLaw/controllerLaw.hpp"
 #include "planner/planner.hpp"
-#include "planner/jogPlanner.h"
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
 #include "math.h"
-
-constexpr double jogStopVelLimit = 0.001;
 
 namespace robot_controller
 {
@@ -25,6 +22,8 @@ namespace robot_controller
         double filterParams = 0.005;            // 调参滤波参数
         const double cycleTime = 0.001;         // 运行周期0.001s
         Eigen::Matrix<double, _Dofs, 1> q_hold; // 维持位置
+        Eigen::Vector3d position_hold;
+        Eigen::Quaterniond orientation_hold;
 
         // 点动参数
         bool jogSign = false;
@@ -56,11 +55,17 @@ namespace robot_controller
         std::vector<std::queue<double>> q_dRunQueue{_Dofs};
         std::vector<std::queue<double>> dq_dRunQueue{_Dofs};
         std::vector<std::queue<double>> ddq_dRunQueue{_Dofs};
+        std::vector<std::queue<double>> x_dRunQueue{6};
+        std::vector<std::queue<double>> dx_dRunQueue{6};
+        std::vector<std::queue<double>> ddx_dRunQueue{6};
 
         // 急停队列
         std::vector<std::queue<double>> q_dStopQueue{_Dofs};
         std::vector<std::queue<double>> dq_dStopQueue{_Dofs};
         std::vector<std::queue<double>> ddq_dStopQueue{_Dofs};
+        std::vector<std::queue<double>> x_dStopQueue{6};
+        std::vector<std::queue<double>> dx_dStopQueue{6};
+        std::vector<std::queue<double>> ddx_dStopQueue{6};
 
         // 进程通讯
         bool connectStatus = false;
@@ -76,7 +81,8 @@ namespace robot_controller
         ControllerParamBase<_Dofs> controllerParam;
 
         // 规划器
-        std::unique_ptr<Planner<_Dofs>> planner;
+        std::unique_ptr<Planner<_Dofs>> jointPlanner;
+        std::unique_ptr<Planner<6>> taskPlanner;
         PlannerType plannerType = PlannerType::Quintic_;
         PlannerType plannerType_d = PlannerType::Quintic_;
 
@@ -101,8 +107,6 @@ namespace robot_controller
         void stopMotion();
         void clearMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
         bool checkMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
-        void calJogMove(my_robot::Robot<_Dofs> *robot);
-        void calJogStop(my_robot::Robot<_Dofs> *robot);
 
         // init
         void init(int recordPeriod, my_robot::Robot<_Dofs> *robot);
@@ -156,7 +160,7 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::changePlanner(PlannerType type)
     {
-        if (!newPlanner(this->planner, type))
+        if (!newPlanner(this->jointPlanner, type))
             printf("Planner create Error\n");
     }
     template <int _Dofs, typename pubDataType>
@@ -216,8 +220,8 @@ namespace robot_controller
         Eigen::Matrix<double, _Dofs, 1> jerkLimit = robot->getdddqLimit();
 
         // note: 显示指定模板类型
-        if (!this->planner->calPlanQueue(true, this->cycleTime, velLimit, accLimit, jerkLimit, robot->getq(), this->q_calQueue, robot->getdq(),
-                                         this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue))
+        if (!this->jointPlanner->calPlanQueue(true, this->cycleTime, velLimit, accLimit, jerkLimit, robot->getq(), this->q_calQueue, robot->getdq(),
+                                              this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue))
         {
             this->clearMotionQueue(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
             return;
@@ -261,42 +265,6 @@ namespace robot_controller
         if (this->controllerLaw.get() != nullptr)
             this->controllerLaw->setTaskSpace(this->runTaskSpace);
     }
-    template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::calJogMove(my_robot::Robot<_Dofs> *robot)
-    {
-        Eigen::Matrix<double, _Dofs, 1> dddqLimit = robot->getdddqLimit();
-        Eigen::Matrix<double, _Dofs, 1> ddqLimit = robot->getddqLimit();
-        Eigen::Matrix<double, _Dofs, 1> dqLimit = this->jogSpeed * robot->getdqLimit();
-        if (this->jogMoveFlag)
-        {
-            calJogMovePlan(jogMoveFlag, cycleTime, this->jogDir, dddqLimit[jogNum - 1], ddqLimit[jogNum - 1], dqLimit[jogNum - 1],
-                           this->controllerLaw->q_d[jogNum - 1], this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1]);
-            this->jogMoveFlag = false;
-        }
-        else
-        {
-            calJogMovePlan(jogMoveFlag, cycleTime, this->jogDir, dddqLimit[jogNum - 1], ddqLimit[jogNum - 1], dqLimit[jogNum - 1],
-                           this->controllerLaw->q_d[jogNum - 1], this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1]);
-        }
-    }
-    template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::calJogStop(my_robot::Robot<_Dofs> *robot)
-    {
-        Eigen::Matrix<double, _Dofs, 1> dddqLimit = robot->getdddqLimit();
-        Eigen::Matrix<double, _Dofs, 1> ddqLimit = robot->getddqLimit();
-        if (this->jogStopFlag)
-        {
-            calJogStopPlan(jogStopFlag, cycleTime, this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1], dddqLimit[jogNum - 1],
-                           ddqLimit[jogNum - 1], this->controllerLaw->q_d[jogNum - 1], this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1]);
-            this->jogStopFlag = false;
-        }
-        else
-        {
-            calJogStopPlan(jogStopFlag, cycleTime, this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1], dddqLimit[jogNum - 1],
-                           ddqLimit[jogNum - 1],
-                           this->controllerLaw->q_d[jogNum - 1], this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1]);
-        }
-    }
 
     //******************************************************************init******************************************************************//
     // init
@@ -316,7 +284,7 @@ namespace robot_controller
         for (int i = 0; i < 6; i++)
         {
             controllerParam.cartesianParam1[i].value = 40;
-            controllerParam.cartesianParam2[i].value = 10;
+            controllerParam.cartesianParam2[i].value = 5;
         }
 
         // 建立通信 建立数据映射
@@ -378,7 +346,6 @@ namespace robot_controller
         this->runSpeed_d = (double)this->controllerCommandBUff->runSpeed_d / 100.0;
         this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
         this->plannerType_d = this->controllerCommandBUff->plannerType_d;
-        this->jogSign = this->controllerCommandBUff->jogSign;
 
         if (this->controllerCommandBUff->newLimit) // 新的限位设置
         {                                          // note: 数组->matrix
@@ -409,6 +376,7 @@ namespace robot_controller
         }
         this->jogSign = this->controllerCommandBUff->jogSign;
         this->jogNum = this->controllerCommandBUff->jogNum;
+        this->jogDir = this->controllerCommandBUff->jogDir;
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::updateStatus(my_robot::Robot<_Dofs> *robot)
@@ -468,8 +436,6 @@ namespace robot_controller
             this->jogStopFlag = true;
             this->nowControllerStatus = RunStatus::jogStop_;
         }
-        this->jogNum = this->controllerCommandBUff->jogNum;
-        this->jogDir = this->controllerCommandBUff->jogDir;
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calDesireNext(my_robot::Robot<_Dofs> *robot)
@@ -477,52 +443,47 @@ namespace robot_controller
         switch (this->nowControllerStatus)
         {
         case RunStatus::wait_:
-            this->controllerLaw->q_d = this->q_hold;
-            this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
-            this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->calWaitDesireNext(this->q_hold, this->position_hold, this->orientation_hold);
             break;
         case RunStatus::run_:
-            for (int i = 0; i < _Dofs; i++)
+            if ((q_dRunQueue[0].empty() && runTaskSpace == TaskSpace::jointSpace) ||
+                (x_dRunQueue[0].empty() && runTaskSpace == TaskSpace::cartesianSpace))
             {
-                this->controllerLaw->q_d[i] = q_dRunQueue[i].front();
-                this->controllerLaw->dq_d[i] = dq_dRunQueue[i].front();
-                this->controllerLaw->ddq_d[i] = ddq_dRunQueue[i].front();
-                q_dRunQueue[i].pop();
-                dq_dRunQueue[i].pop();
-                ddq_dRunQueue[i].pop();
-                if (q_dRunQueue[i].empty())
-                {
-                    this->q_hold = this->controllerLaw->q_d;
-                    this->nowControllerStatus = RunStatus::wait_;
-                }
+                this->q_hold = robot->getq();
+                this->position_hold = robot->getPosition();
+                this->orientation_hold = robot->getOrientation();
+                this->nowControllerStatus = RunStatus::wait_;
+                break;
             }
+            this->controllerLaw->calRunStopDesireNext(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue, this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue);
             break;
         case RunStatus::stop_:
-            for (int i = 0; i < _Dofs; i++)
+            if ((q_dStopQueue[0].empty() && runTaskSpace == TaskSpace::jointSpace) ||
+                (x_dStopQueue[0].empty() && runTaskSpace == TaskSpace::cartesianSpace))
             {
-                this->controllerLaw->q_d[i] = q_dStopQueue[i].front();
-                this->controllerLaw->dq_d[i] = dq_dStopQueue[i].front();
-                this->controllerLaw->ddq_d[i] = ddq_dStopQueue[i].front();
-                q_dStopQueue[i].pop();
-                dq_dStopQueue[i].pop();
-                ddq_dStopQueue[i].pop();
-                if (q_dStopQueue[i].empty())
-                {
-                    this->q_hold = this->controllerLaw->q_d;
-                    this->nowControllerStatus = RunStatus::wait_;
-                }
+                this->q_hold = robot->getq();
+                this->position_hold = robot->getPosition();
+                this->orientation_hold = robot->getOrientation();
+                this->nowControllerStatus = RunStatus::wait_;
+                break;
             }
+            this->controllerLaw->calRunStopDesireNext(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue, this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue);
             break;
         case RunStatus::jog_:
-            this->calJogMove(robot);
+            this->controllerLaw->calJogMove(robot, this->jogMoveFlag, this->jogSpeed, this->cycleTime, this->jogDir, this->jogNum);
             break;
         case RunStatus::jogStop_:
-            this->calJogStop(robot);
-            if (this->controllerLaw->dq_d[jogNum - 1] == 0)
+            if ((this->controllerLaw->dq_d[jogNum - 1] == 0 && runTaskSpace == TaskSpace::jointSpace) /* ||
+                (this->controllerLaw->dposition_d[jogNum - 1] == 0 && runTaskSpace == TaskSpace::cartesianSpace) */
+            )
             {
-                this->q_hold = this->controllerLaw->q_d;
+                this->q_hold = robot->getq();
+                this->position_hold = robot->getPosition();
+                this->orientation_hold = robot->getOrientation();
                 this->nowControllerStatus = RunStatus::wait_;
+                break;
             }
+            this->controllerLaw->calJogStop(robot, this->jogStopFlag, this->cycleTime, this->jogNum);
             break;
         default:
             printf("calDesireNext error\n");
@@ -532,49 +493,8 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calError(my_robot::Robot<_Dofs> *robot)
     {
-        if (controllerLaw.get() == nullptr)
-            return;
-
-        switch (this->runTaskSpace)
-        {
-        case TaskSpace::jointSpace:
-        {
-            // 关节误差与误差导数
-            this->controllerLaw->jointError = this->controllerLaw->q_d - robot->getq();
-            this->controllerLaw->djointError = this->controllerLaw->dq_d - robot->getdq();
-            break;
-        }
-        case TaskSpace::cartesianSpace:
-        {
-            // 笛卡尔位姿误差
-            Eigen::Quaterniond orientation = robot->getOrientation();
-            this->controllerLaw->cartesianError.head(3) = this->controllerLaw->position_d - robot->getPosition();
-            if (this->controllerLaw->orientation_d.coeffs().dot(orientation.coeffs()) < 0.0)
-            {
-                orientation.coeffs() << -orientation.coeffs();
-            }
-            Eigen::Quaterniond error_quaternion(orientation.inverse() * this->controllerLaw->orientation_d);
-            this->controllerLaw->cartesianError.tail(3) << error_quaternion.x(), error_quaternion.y(), error_quaternion.z();
-            this->controllerLaw->cartesianError.tail(3) << robot->getT().rotation() * this->controllerLaw->cartesianError.tail(3);
-
-            // 笛卡尔位姿误差导数
-            Eigen::Quaterniond dorientation = robot->getdOrientation();
-            this->controllerLaw->dcartesianError.head(3) = this->controllerLaw->dposition_d - robot->getdPosition();
-            if (this->controllerLaw->dorientation_d.coeffs().dot(dorientation.coeffs()) < 0.0)
-            {
-                dorientation.coeffs() << -dorientation.coeffs();
-            }
-            Eigen::Quaterniond derror_quaternion(dorientation.inverse() * this->controllerLaw->dorientation_d);
-            this->controllerLaw->cartesianError.tail(3) << derror_quaternion.x(), derror_quaternion.y(), derror_quaternion.z();
-            this->controllerLaw->cartesianError.tail(3) << robot->getT().rotation() * this->controllerLaw->cartesianError.tail(3);
-            break;
-        }
-        default:
-        {
-            printf("calError error\n");
-            break;
-        }
-        }
+        if (controllerLaw.get() != nullptr)
+            this->controllerLaw->calError(robot, this->cycleTime);
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d)
@@ -636,7 +556,6 @@ namespace robot_controller
         // this->myfile << robot->getJ() << "\n";
         // this->myfile << "ExternJ: " << n;
         // this->myfile << robot->getExternJ() << "\n";
-
         // this->myfile << "getTorque: " << robot->getTorque().transpose() << "\n";
         // this->myfile << "tau_d: " << this->controllerLaw->tau_d.transpose() << "\n";
         // this->myfile << "-------------------" << std::endl;
