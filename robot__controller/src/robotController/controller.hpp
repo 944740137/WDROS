@@ -156,6 +156,7 @@ namespace robot_controller
         if (!newControllerLaw(controllerLaw, type, runTaskSpace))
             printf("ControllerLaw create Error\n");
         dynamicSetParameter();
+        this->controllerLaw->setNullSpaceDesire(this->q_hold);
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::changePlanner(PlannerType type)
@@ -175,6 +176,7 @@ namespace robot_controller
         this->controllerStateBUff->robotDof = _Dofs;
         strcpy(this->controllerStateBUff->name, "panda\0\0\0");
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
+        this->controllerCommandBUff->plannerTaskSpace = this->runTaskSpace;
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::startMotion()
@@ -274,7 +276,9 @@ namespace robot_controller
         // 设置数据记录周期
         setRecord(this->recordPeriod);
         this->q_hold = robot->getq();
-
+        this->position_hold = robot->getPosition();
+        this->orientation_hold = robot->getOrientation();
+        std::cout << "position_hold " << position_hold.transpose() << std::endl;
         // tmp
         for (int i = 0; i < _Dofs; i++)
         {
@@ -283,8 +287,8 @@ namespace robot_controller
         }
         for (int i = 0; i < 6; i++)
         {
-            controllerParam.cartesianParam1[i].value = 40;
-            controllerParam.cartesianParam2[i].value = 5;
+            controllerParam.cartesianParam1[i].value = 200;
+            controllerParam.cartesianParam2[i].value = 2;
         }
 
         // 建立通信 建立数据映射
@@ -299,6 +303,7 @@ namespace robot_controller
         // 丢弃数据
         this->controllerCommandBUff->stopSign = false;
         this->controllerCommandBUff->runSign = false;
+        this->controllerCommandBUff->jogSign = false;
         this->controllerCommandBUff->newLimit = false;
         changeControllerLaw(this->controllerLawType);
         changePlanner(this->plannerType);
@@ -361,7 +366,6 @@ namespace robot_controller
         }
         if (this->controllerCommandBUff->runSign) // 新的规划任务
         {
-            this->runTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
             for (int i = 0; i < _Dofs; i++)
             {
                 this->q_calQueue[i] = this->controllerCommandBUff->q_final[i] * M_PI / 180.0;
@@ -374,6 +378,7 @@ namespace robot_controller
             this->controllerCommandBUff->stopSign = false;
             this->newStop = true;
         }
+        this->runTaskSpace_d = this->controllerCommandBUff->plannerTaskSpace;
         this->jogSign = this->controllerCommandBUff->jogSign;
         this->jogNum = this->controllerCommandBUff->jogNum;
         this->jogDir = this->controllerCommandBUff->jogDir;
@@ -450,9 +455,10 @@ namespace robot_controller
                 (x_dRunQueue[0].empty() && runTaskSpace == TaskSpace::cartesianSpace))
             {
                 this->q_hold = robot->getq();
-                this->position_hold = robot->getPosition();
-                this->orientation_hold = robot->getOrientation();
+                this->position_hold = this->controllerLaw->position_d;
+                this->orientation_hold = this->controllerLaw->orientation_d;
                 this->nowControllerStatus = RunStatus::wait_;
+                this->controllerLaw->setNullSpaceDesire(this->q_hold);
                 break;
             }
             this->controllerLaw->calRunStopDesireNext(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue, this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue);
@@ -462,9 +468,10 @@ namespace robot_controller
                 (x_dStopQueue[0].empty() && runTaskSpace == TaskSpace::cartesianSpace))
             {
                 this->q_hold = robot->getq();
-                this->position_hold = robot->getPosition();
-                this->orientation_hold = robot->getOrientation();
+                this->position_hold = this->controllerLaw->position_d;
+                this->orientation_hold = this->controllerLaw->orientation_d;
                 this->nowControllerStatus = RunStatus::wait_;
+                this->controllerLaw->setNullSpaceDesire(this->q_hold);
                 break;
             }
             this->controllerLaw->calRunStopDesireNext(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue, this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue);
@@ -473,14 +480,14 @@ namespace robot_controller
             this->controllerLaw->calJogMove(robot, this->jogMoveFlag, this->jogSpeed, this->cycleTime, this->jogDir, this->jogNum);
             break;
         case RunStatus::jogStop_:
-            if ((this->controllerLaw->dq_d[jogNum - 1] == 0 && runTaskSpace == TaskSpace::jointSpace) /* ||
-                (this->controllerLaw->dposition_d[jogNum - 1] == 0 && runTaskSpace == TaskSpace::cartesianSpace) */
-            )
+            if ((this->controllerLaw->dq_d[jogNum - 1] == 0 && runTaskSpace == TaskSpace::jointSpace) ||
+                (this->controllerLaw->dposition_d[jogNum - 1] == 0 && runTaskSpace == TaskSpace::cartesianSpace))
             {
                 this->q_hold = robot->getq();
-                this->position_hold = robot->getPosition();
-                this->orientation_hold = robot->getOrientation();
+                this->position_hold = this->controllerLaw->position_d;
+                this->orientation_hold = this->controllerLaw->orientation_d;
                 this->nowControllerStatus = RunStatus::wait_;
+                this->controllerLaw->setNullSpaceDesire(this->q_hold);
                 break;
             }
             this->controllerLaw->calJogStop(robot, this->jogStopFlag, this->cycleTime, this->jogNum);
@@ -552,10 +559,12 @@ namespace robot_controller
         // this->myfile << robot->getG() << n;
         // this->myfile << "ExternG: " << n;
         // this->myfile << robot->getExternG() << n;
-        // this->myfile << "J: " << n;
-        // this->myfile << robot->getJ() << "\n";
-        // this->myfile << "ExternJ: " << n;
-        // this->myfile << robot->getExternJ() << "\n";
+        this->myfile << "J: " << n;
+        this->myfile << robot->getJ() << "\n";
+        this->myfile << "ExternJ: " << n;
+        this->myfile << robot->getExternJ() << "\n";
+        this->myfile << "getdJ: " << n;
+        this->myfile << robot->getdJ() << "\n";
         // this->myfile << "getTorque: " << robot->getTorque().transpose() << "\n";
         // this->myfile << "tau_d: " << this->controllerLaw->tau_d.transpose() << "\n";
         // this->myfile << "-------------------" << std::endl;
@@ -578,16 +587,21 @@ namespace robot_controller
 
             param_debug.tau_d[i] = this->controllerLaw->tau_d[i];
         }
-        for (int i = 0; i < 6; i++)
-        {
-            param_debug.cartesianError[i] = this->controllerLaw->cartesianError[i];
-        }
         for (int i = 0; i < 3; i++)
         {
             param_debug.position[i] = robot->getPosition()[i];
+            param_debug.dposition[i] = robot->getdPosition()[i];
             param_debug.position_d[i] = this->controllerLaw->position_d[i];
-            param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
-            param_debug.orientation_d[i] = this->controllerLaw->orientation_d.toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
+            param_debug.dposition_d[i] = this->controllerLaw->dposition_d[i];
+
+            param_debug.cartesianError[i] = this->controllerLaw->cartesianError[i];
+            // param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
+            // param_debug.orientation_d[i] = this->controllerLaw->orientation_d.toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            param_debug.cartesianError[i] = this->controllerLaw->cartesianError[i];
         }
     }
 };

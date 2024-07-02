@@ -56,8 +56,10 @@ void dynamicSetParameterTempl(TaskSpace taskSpace, const ControllerParamBase<_Do
         }
         for (int i = 0; i < 6; i++)
         {
-            cartesianK1_d(i, i) = config.cartesianParam1[i].value;
-            cartesianK2_d(i, i) = config.cartesianParam2[i].value;
+            // cartesianK1_d(i, i) = config.cartesianParam1[i].value;
+            // cartesianK2_d(i, i) = config.cartesianParam2[i].value;
+            cartesianK1(i, i) = config.cartesianParam1[i].value;
+            cartesianK2(i, i) = config.cartesianParam2[i].value;
         }
     }
 }
@@ -90,6 +92,7 @@ public:
     Eigen::Matrix<double, 6, 1> cartesianOldError;
 
     // 当前时刻期望 关节空间
+    Eigen::Matrix<double, _Dofs, 1> q_nullSapce;
     Eigen::Matrix<double, _Dofs, 1> q_d;
     Eigen::Matrix<double, _Dofs, 1> dq_d;
     Eigen::Matrix<double, _Dofs, 1> ddq_d;
@@ -105,6 +108,10 @@ public:
     Eigen::Matrix<double, _Dofs, 1> tau_d;
     Eigen::Matrix<double, _Dofs, 1> qc;
 
+    // null-space
+    double nullSpaceK = 50;
+    double nullSpaceD = 1;
+
 public:
     ControllerLaw(const ControllerLaw &) = delete;
     void operator=(const ControllerLaw &) = delete;
@@ -119,8 +126,9 @@ public:
                               std::vector<std::queue<double>> &ddq_dQueue, std::vector<std::queue<double>> &x_dQueue,
                               std::vector<std::queue<double>> &dx_dQueue, std::vector<std::queue<double>> &ddx_dQueue);
     void calJogMove(my_robot::Robot<_Dofs> *robot, bool &jogMoveFlag, double jogSpeed,
-                                          double cycleTime, int jogDir, int jogNum);
+                    double cycleTime, int jogDir, int jogNum);
     void calJogStop(my_robot::Robot<_Dofs> *robot, bool &jogStopFlag, double cycleTime, int jogNum);
+    void setNullSpaceDesire(Eigen::Matrix<double, _Dofs, 1> &q_ns);
 
     virtual void setTaskSpace(TaskSpace newTaskSpace);
     virtual void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d) = 0;
@@ -149,7 +157,6 @@ ControllerLaw<_Dofs>::ControllerLaw(TaskSpace createTaskSpace, std::string creat
                                                                                                       qc(Eigen::Matrix<double, _Dofs, 1>::Zero()),
                                                                                                       taskSpace(createTaskSpace),
                                                                                                       controllerLawName(createControllerLawName)
-
 {
     // 全部初始化为0
 }
@@ -193,17 +200,12 @@ void ControllerLaw<_Dofs>::calError(my_robot::Robot<_Dofs> *robot, double cycleT
 template <int _Dofs>
 void ControllerLaw<_Dofs>::calWaitDesireNext(Eigen::Matrix<double, _Dofs, 1> &q_hold, Eigen::Vector3d &position_hold, Eigen::Quaterniond &orientation_hold)
 {
-    if (this->taskSpace == jointSpace)
-    {
-        this->q_d = q_hold;
-        this->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
-        this->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
-    }
-    else
-    {
-        this->position_d = position_hold;
-        this->orientation_d = orientation_hold;
-    }
+    this->q_d = q_hold;
+    this->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+    this->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+
+    this->position_d = position_hold;
+    this->orientation_d = orientation_hold;
 }
 template <int _Dofs>
 void ControllerLaw<_Dofs>::calRunStopDesireNext(std::vector<std::queue<double>> &q_dQueue, std::vector<std::queue<double>> &dq_dQueue,
@@ -268,6 +270,30 @@ void ControllerLaw<_Dofs>::calJogMove(my_robot::Robot<_Dofs> *robot, bool &jogMo
     }
     else
     {
+        if (jogNum <= 3)
+        {
+            double dddposLimit = robot->dddposLimit;
+            double ddposLimit = robot->ddposLimit;
+            double dposLimit = jogSpeed * robot->dposLimit;
+            if (jogMoveFlag)
+            {
+                calJogMovePlan(jogMoveFlag, cycleTime, jogDir, dddposLimit, ddposLimit, dposLimit,
+                               this->position_d[jogNum - 1], this->dposition_d[jogNum - 1], this->ddX_d[jogNum - 1]);
+                jogMoveFlag = false;
+            }
+            else
+            {
+                calJogMovePlan(jogMoveFlag, cycleTime, jogDir, dddposLimit, ddposLimit, dposLimit,
+                               this->position_d[jogNum - 1], this->dposition_d[jogNum - 1], this->ddX_d[jogNum - 1]);
+            }
+        }
+        else
+        {
+        }
+        // std::cout << " move jogNum " << jogNum;
+        // std::cout << " x " << this->position_d[jogNum - 1];
+        // std::cout << " dx " << this->dposition_d[jogNum - 1];
+        // std::cout << " dx " << this->ddX_d[jogNum - 1] << std::endl;
     }
 }
 template <int _Dofs>
@@ -291,7 +317,36 @@ void ControllerLaw<_Dofs>::calJogStop(my_robot::Robot<_Dofs> *robot, bool &jogSt
     }
     else
     {
+        if (jogNum <= 3)
+        {
+            double dddposLimit = robot->dddposLimit;
+            double ddposLimit = robot->ddposLimit;
+            if (jogStopFlag)
+            {
+                calJogStopPlan(jogStopFlag, cycleTime, dddposLimit, ddposLimit,
+                               this->position_d[jogNum - 1], this->dposition_d[jogNum - 1], this->ddX_d[jogNum - 1]);
+                jogStopFlag = false;
+            }
+            else
+            {
+                calJogStopPlan(jogStopFlag, cycleTime, dddposLimit, ddposLimit,
+                               this->position_d[jogNum - 1], this->dposition_d[jogNum - 1], this->ddX_d[jogNum - 1]);
+            }
+            // std::cout << " stop jogNum " << jogNum;
+            // std::cout << " x " << this->position_d[jogNum - 1];
+            // std::cout << " dx " << this->dposition_d[jogNum - 1];
+            // std::cout << " dx " << this->ddX_d[jogNum - 1] << std::endl;
+        }
+        else
+        {
+        }
     }
+}
+
+template <int _Dofs>
+void ControllerLaw<_Dofs>::setNullSpaceDesire(Eigen::Matrix<double, _Dofs, 1> &q_ns)
+{
+    this->q_nullSapce = q_ns;
 }
 //
 //
@@ -355,7 +410,8 @@ void ComputedTorqueMethod<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Mat
     }
     else
     {
-        this->tau_d << robot->getM() * (robot->getJ_inv() * (this->ddX_d - this->cartesianKp_d * this->cartesianError - this->cartesianKv_d * this->dcartesianError - robot->getExternJ() * robot->getdq())) + robot->getC() * robot->getdq() /* + G */;
+        this->tau_d << robot->getM() * (robot->getJ_inv() * (this->ddX_d + this->cartesianKp_d * this->cartesianError + this->cartesianKv_d * this->dcartesianError - robot->getdJ() * robot->getdq())) + robot->getC() * robot->getdq() /* + G */;
+        this->tau_d = this->tau_d + (Eigen::MatrixXd::Identity(7, 7) - robot->getJ().transpose() * robot->getJ_inv().transpose()) * (this->nullSpaceK * (this->q_nullSapce - robot->getq()) - this->nullSpaceD * robot->getdq());
         tau_d_in = this->tau_d;
     }
 }
@@ -447,7 +503,8 @@ void Backstepping<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<doub
     }
     else
     {
-        this->tau_d << robot->getM() * (robot->getJ_inv() * (this->ddX_d - this->cartesianK1 * this->cartesianError - this->cartesianK2 * this->dcartesianError - robot->getExternJ() * robot->getdq())) + robot->getC() * robot->getdq() /* + G */;
+        this->tau_d << robot->getM() * (robot->getJ_inv() * (this->ddX_d + this->cartesianK1 * this->cartesianError + this->cartesianK2 * this->dcartesianError - robot->getExternJ() * robot->getdq())) + robot->getC() * robot->getdq() /* + G */;
+        this->tau_d = this->tau_d + (Eigen::MatrixXd::Identity(7, 7) - robot->getJ().transpose() * robot->getJ_inv().transpose()) * (this->nullSpaceK * (this->q_nullSapce - robot->getq()) - this->nullSpaceD * robot->getdq());
         tau_d_in = this->tau_d;
     }
 }
@@ -526,7 +583,8 @@ void PD<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs,
     }
     else
     {
-        this->tau_d << robot->getJ_inv() * (this->ddX_d - this->cartesianKp_d * this->cartesianError - this->cartesianKv_d * this->dcartesianError - robot->getExternJ() * robot->getdq()) + robot->getC() * robot->getdq() /* + G */;
+        this->tau_d << robot->getJ_inv() * (this->ddX_d + this->cartesianKp_d * this->cartesianError + this->cartesianKv_d * this->dcartesianError - robot->getExternJ() * robot->getdq()) + robot->getC() * robot->getdq() /* + G */;
+        this->tau_d = this->tau_d + (Eigen::MatrixXd::Identity(7, 7) - robot->getJ().transpose() * robot->getJ_inv().transpose()) * (this->nullSpaceK * (this->q_nullSapce - robot->getq()) - this->nullSpaceD * robot->getdq());
         tau_d_in = this->tau_d;
     }
 }

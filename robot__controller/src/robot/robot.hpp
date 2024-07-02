@@ -47,7 +47,7 @@ namespace my_robot
         Eigen::Matrix<double, _Dofs, 1> externG;
         Eigen::Matrix<double, 6, _Dofs> externJ;
         Eigen::Matrix<double, 6, _Dofs> externdJ;
-        Eigen::Matrix<double, _Dofs, 6> externdJ_inv;
+        Eigen::Matrix<double, _Dofs, 6> externJ_inv;
 
     public:
         Eigen::Matrix<double, _Dofs, 1> qMax;      /* = {2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973}; */
@@ -55,6 +55,12 @@ namespace my_robot
         Eigen::Matrix<double, _Dofs, 1> dqLimit;   /* = {2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100}; */
         Eigen::Matrix<double, _Dofs, 1> ddqLimit;  /* = {15, 7.5, 10, 12.5, 15, 20, 20}; */
         Eigen::Matrix<double, _Dofs, 1> dddqLimit; /* = {1500, 750, 1000, 1250, 1500, 2000, 2000}; */
+        double dposLimit = 0.5;
+        double ddposLimit = 5;
+        double dddposLimit = 20;
+        double doriLimit = 1;
+        double ddoriLimit = 10;
+        double dddoriLimit = 100;
 
         Robot(const Robot &) = delete;
         void operator=(const Robot &) = delete;
@@ -100,10 +106,12 @@ namespace my_robot
         const Eigen::Matrix<double, _Dofs, 1> &getExternc(); // 科氏项
         const Eigen::Matrix<double, _Dofs, 1> &getExternG();
         const Eigen::Matrix<double, 6, _Dofs> &getExternJ();
+        const Eigen::Matrix<double, _Dofs, 6> &getExternJ_inv();
 
         // pinocchino dyn api
         void calculation(Eigen::Matrix<double, _Dofs, 1> ddq_d);
         const Eigen::Matrix<double, 6, _Dofs> &getJ();
+        const Eigen::Matrix<double, 6, _Dofs> &getdJ();
         const Eigen::Matrix<double, _Dofs, 6> &getJ_inv();
         const Eigen::Matrix<double, _Dofs, _Dofs> &getM();
         const Eigen::Matrix<double, _Dofs, _Dofs> &getC();
@@ -130,7 +138,7 @@ namespace my_robot
                             dJ(Eigen::Matrix<double, 6, _Dofs>::Zero()), J_inv(Eigen::Matrix<double, _Dofs, 6>::Zero()),
                             externc(Eigen::Matrix<double, _Dofs, 1>::Zero()), externM(Eigen::Matrix<double, _Dofs, _Dofs>::Zero()),
                             externG(Eigen::Matrix<double, _Dofs, 1>::Zero()), externJ(Eigen::Matrix<double, 6, _Dofs>::Zero()),
-                            externdJ(Eigen::Matrix<double, 6, _Dofs>::Zero()), externdJ_inv(Eigen::Matrix<double, _Dofs, 6>::Zero())
+                            externdJ(Eigen::Matrix<double, 6, _Dofs>::Zero()), externJ_inv(Eigen::Matrix<double, _Dofs, 6>::Zero())
     {
         // 全部数据初始化为0
     }
@@ -284,6 +292,11 @@ namespace my_robot
         return this->J;
     }
     template <int _Dofs>
+    const Eigen::Matrix<double, 6, _Dofs> &Robot<_Dofs>::getdJ()
+    {
+        return this->dJ;
+    }
+    template <int _Dofs>
     const Eigen::Matrix<double, _Dofs, 6> &Robot<_Dofs>::getJ_inv()
     {
         return this->J_inv;
@@ -337,5 +350,11 @@ namespace my_robot
     const Eigen::Matrix<double, 6, _Dofs> &Robot<_Dofs>::getExternJ()
     {
         return this->externJ;
+    }
+    template <int _Dofs>
+    const Eigen::Matrix<double, _Dofs, 6> &Robot<_Dofs>::getExternJ_inv()
+    {
+        weightedPseudoInverse(this->externJ, this->externJ_inv, this->M);
+        return this->externJ_inv;
     }
 }
