@@ -19,27 +19,27 @@ void pandaInit(std::string &urdfPath, std::string &TcpName)
     }
 }
 
-void pandaStart(const Eigen::Matrix<double, DIM, 1> &q, const Eigen::Matrix<double, DIM, 1> &theta,
+void pandaStart(const Eigen::Matrix<double, DIM, 1> &q, const std::array<double, 7> &qArray, const Eigen::Matrix<double, DIM, 1> &theta,
                 const Eigen::Matrix<double, DIM, 1> &dq, const Eigen::Matrix<double, DIM, 1> &tau,
-                const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, int recordPeriod)
+                const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, const std::array<double, 16> &T02EEArray, int recordPeriod)
 {
     pPanda->setq0(q);
     pPanda->setPosAndOri0(position, orientation);
 
-    pPanda->updateJointData(q, theta, dq, tau);
-    pPanda->updateEndeffectorData(position, orientation, TO2E);
+    pPanda->updateJointData(q, qArray, theta, dq, tau);
+    pPanda->updateEndeffectorData(position, orientation, TO2E, T02EEArray);
 
     pController->init(recordPeriod, pPanda);
 }
 
-void pandaRun(const Eigen::Matrix<double, DIM, 1> &q, const Eigen::Matrix<double, DIM, 1> &dq,
+void pandaRun(const Eigen::Matrix<double, DIM, 1> &q, const std::array<double, 7> &qArray, const Eigen::Matrix<double, DIM, 1> &dq,
               const Eigen::Matrix<double, DIM, 1> &theta, const Eigen::Matrix<double, DIM, 1> &tau,
-              const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E,
+              const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, const std::array<double, 16> &T02EEArray,
               Eigen::Matrix<double, DIM, 1> &tau_d, robot_controller::paramForDebug &param_debug, Eigen::Matrix<double, DIM, 1> &q_d)
 {
     // 机器人更新传感器数据
-    pPanda->updateJointData(q, theta, dq, tau);
-    pPanda->updateEndeffectorData(position, orientation, TO2E);
+    pPanda->updateJointData(q, qArray, theta, dq, tau);
+    pPanda->updateEndeffectorData(position, orientation, TO2E, T02EEArray);
     pPanda->calculation(pController->controllerLaw->ddq_d); // pinocchio
 
     // 控制器更新时间

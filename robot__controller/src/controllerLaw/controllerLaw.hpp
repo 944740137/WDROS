@@ -3,6 +3,7 @@
 #include "planner/jogPlanner.h"
 #include <vector>
 #include <queue>
+
 struct ControllerParam
 {
     char paramName[2] = {0};
@@ -65,6 +66,10 @@ public:
     Eigen::Matrix<double, _Dofs, 1> dq_d;
     Eigen::Matrix<double, _Dofs, 1> ddq_d;
 
+    Eigen::Matrix<double, 6, 1> x_d;
+    Eigen::Matrix<double, 6, 1> dx_d;
+    Eigen::Matrix<double, 6, 1> ddx_d;
+
     // controllerLaw
     Eigen::Matrix<double, _Dofs, 1> tau_d;
     Eigen::Matrix<double, _Dofs, 1> qc;
@@ -77,7 +82,8 @@ public:
     virtual ~ControllerLaw();
 
     void calError(my_robot::Robot<_Dofs> *robot);
-    void calWaitDesireNext(Eigen::Matrix<double, _Dofs, 1> &q_hold);
+    void initDesire(Eigen::Matrix<double, _Dofs, 1> &q_hold, const Eigen::Vector3d &position_hold, const Eigen::Quaterniond &orientation_hold);
+    void calWaitDesireNext();
     void calRunStopDesireNext(std::vector<std::queue<double>> &q_dQueue, std::vector<std::queue<double>> &dq_dQueue,
                               std::vector<std::queue<double>> &ddq_dQueue);
     void setNullSpaceDesire(Eigen::Matrix<double, _Dofs, 1> &q_ns);
@@ -111,9 +117,15 @@ void ControllerLaw<_Dofs>::calError(my_robot::Robot<_Dofs> *robot)
     this->djointError = this->dq_d - robot->getdq();
 }
 template <int _Dofs>
-void ControllerLaw<_Dofs>::calWaitDesireNext(Eigen::Matrix<double, _Dofs, 1> &q_hold)
+void ControllerLaw<_Dofs>::initDesire(Eigen::Matrix<double, _Dofs, 1> &q_hold, const Eigen::Vector3d &position_hold, const Eigen::Quaterniond &orientation_hold)
 {
     this->q_d = q_hold;
+    this->x_d.segment<3>(0) = position_hold;
+    this->x_d.segment<3>(3) = orientation_hold.toRotationMatrix().eulerAngles(0, 1, 2);
+}
+template <int _Dofs>
+void ControllerLaw<_Dofs>::calWaitDesireNext()
+{
     this->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
     this->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
 }
@@ -131,8 +143,6 @@ void ControllerLaw<_Dofs>::calRunStopDesireNext(std::vector<std::queue<double>> 
         ddq_dQueue[i].pop();
     }
 }
-
-
 
 template <int _Dofs>
 void ControllerLaw<_Dofs>::setNullSpaceDesire(Eigen::Matrix<double, _Dofs, 1> &q_ns)
@@ -182,7 +192,7 @@ template <int _Dofs>
 void ComputedTorqueMethod<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d_in)
 {
     this->qc = this->ddq_d + jointKp * this->jointError + jointKv * this->djointError;
-    this->tau_d << robot->getM() * (this->qc) + robot->getC() * robot->getdq() /* + G */;
+    this->tau_d << robot->getExternM() * (this->qc) + robot->getC() * robot->getdq() /* + G */;
     tau_d_in = this->tau_d;
 }
 template <int _Dofs>
@@ -252,7 +262,7 @@ void Backstepping<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<doub
     this->e2 = this->djointError + this->jointK1 * e1;
     this->r = this->dq_d + this->jointK1 * e1;
     this->dr = this->ddq_d + this->jointK1 * this->djointError;
-    this->tau_d << robot->getM() * (this->dr) + robot->getC() * (this->dr) /* + G */ + this->jointK2 * this->e2 + this->e1;
+    this->tau_d << robot->getExternM() * (this->dr) + robot->getC() * (this->dr) /* + G */ + this->jointK2 * this->e2 + this->e1;
     tau_d_in = this->tau_d;
 }
 

@@ -128,7 +128,7 @@ namespace robot_controller
     this->transform = Eigen::Affine3d(Eigen::Matrix4d::Map(initial_state.O_T_EE.data())); // 齐次变换矩阵
     this->position = Eigen::Vector3d(transform.translation());
     this->orientation = Eigen::Quaterniond(transform.rotation());
-    pandaStart(this->q, this->theta, this->dq, this->tau_J_d, this->position, this->orientation, this->transform, 1);
+    pandaStart(this->q, initial_state.q, this->theta, this->dq, this->tau_J_d, this->position, this->orientation, this->transform, initial_state.O_T_EE, 1);
   }
 
   void PandaController::update(const ros::Time & /*time*/, const ros::Duration &t)
@@ -153,7 +153,7 @@ namespace robot_controller
     // 更新franka计算的动力学数据
     pandaGetDyn(this->M, this->c, this->G, this->J);
     // 更新控制力矩或目标位置(只发目标位置时，使用franka的控制器)
-    pandaRun(this->q, this->dq, this->theta, this->tau_J_d, this->position, this->orientation, this->transform, this->tau_d, this->param_debug, q_d);
+    pandaRun(this->q, robot_state.q, this->dq, this->theta, this->tau_J_d, this->position, this->orientation, this->transform, robot_state.O_T_EE, this->tau_d, this->param_debug, q_d);
 
     // 平滑力矩命令并发布
     this->tau_d << saturateTorqueRate(this->tau_d, this->tau_J_d);

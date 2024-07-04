@@ -2,12 +2,14 @@
 #include "controllerLaw/controllerLaw.hpp"
 #include "planner/planner.hpp"
 #include "planner/jogPlanner.h"
+#include "algorithm/frankaIK.h"
+#include "algorithm/frankaFK.h"
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
 #include "math.h"
-
+static int debug = 0;
 namespace robot_controller
 {
     // _Dofs自由度机器人控制器
@@ -100,12 +102,13 @@ namespace robot_controller
         void dynamicSetParameter();
         void changeControllerLaw(ControllerLawType type);
         void changePlanner(PlannerType type);
-        void changeTaskSpace();
         void initStateToMaster();
         void calRunQueue(my_robot::Robot<_Dofs> *robot);
         void calStopQueue(my_robot::Robot<_Dofs> *robot);
-        void calJonitJogMove(my_robot::Robot<_Dofs> *robot);
-        void calJonitJogStop(my_robot::Robot<_Dofs> *robot);
+        void calJointJogMove(my_robot::Robot<_Dofs> *robot);
+        void calJointJogStop(my_robot::Robot<_Dofs> *robot);
+        void calCartesianJogMove(my_robot::Robot<_Dofs> *robot);
+        void calCartesianJogStop(my_robot::Robot<_Dofs> *robot);
         void startMotion();
         void stopMotion();
         void clearMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
@@ -159,6 +162,7 @@ namespace robot_controller
         if (!newControllerLaw(controllerLaw, type))
             printf("ControllerLaw create Error\n");
         dynamicSetParameter();
+        this->controllerLaw->initDesire(this->q_hold, this->position_hold, this->orientation_hold);
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::changePlanner(PlannerType type)
@@ -264,7 +268,7 @@ namespace robot_controller
         }
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::calJonitJogMove(my_robot::Robot<_Dofs> *robot)
+    void Controller<_Dofs, pubDataType>::calJointJogMove(my_robot::Robot<_Dofs> *robot)
     {
         Eigen::Matrix<double, _Dofs, 1> dddqLimit = robot->getdddqLimit();
         Eigen::Matrix<double, _Dofs, 1> ddqLimit = robot->getddqLimit();
@@ -282,7 +286,7 @@ namespace robot_controller
         }
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::calJonitJogStop(my_robot::Robot<_Dofs> *robot)
+    void Controller<_Dofs, pubDataType>::calJointJogStop(my_robot::Robot<_Dofs> *robot)
     {
         Eigen::Matrix<double, _Dofs, 1> dddqLimit = robot->getdddqLimit();
         Eigen::Matrix<double, _Dofs, 1> ddqLimit = robot->getddqLimit();
@@ -298,6 +302,67 @@ namespace robot_controller
                            this->controllerLaw->q_d[jogNum - 1], this->controllerLaw->dq_d[jogNum - 1], this->controllerLaw->ddq_d[jogNum - 1]);
         }
     }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::calCartesianJogMove(my_robot::Robot<_Dofs> *robot)
+    {
+        if (this->jogNum <= 3)
+        {
+            double dddposLimit = robot->dddposLimit;
+            double ddposLimit = robot->ddposLimit;
+            double dposLimit = this->jogSpeed * robot->dposLimit;
+            if (this->jogMoveFlag)
+            {
+                calJogMovePlan(this->jogMoveFlag, this->cycleTime, this->jogDir, dddposLimit, ddposLimit, dposLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+                this->jogMoveFlag = false;
+            }
+            else
+            {
+                calJogMovePlan(this->jogMoveFlag, this->cycleTime, this->jogDir, dddposLimit, ddposLimit, dposLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+            }
+            std::array<double, 16> array16 = robot->getT02EEArray();
+            array16[jogNum + 11] = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
+            std::array<double, 7> IKresult = franka_IK_EE_CC(array16, robot->getq()[6], robot->getqArray());
+            this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
+        }
+        else
+        {
+        }
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::calCartesianJogStop(my_robot::Robot<_Dofs> *robot)
+    {
+        if (this->jogNum <= 3)
+        {
+            double dddposLimit = robot->dddposLimit;
+            double ddposLimit = robot->ddposLimit;
+            double dposLimit = this->jogSpeed * robot->dposLimit;
+            if (this->jogStopFlag)
+            {
+                calJogStopPlan(jogStopFlag, cycleTime, dddposLimit, ddposLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+                this->jogStopFlag = false;
+            }
+            else
+            {
+                calJogStopPlan(jogStopFlag, cycleTime, dddposLimit, ddposLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+            }
+            std::array<double, 16> array16 = robot->getT02EEArray();
+            array16[jogNum + 11] = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
+            std::array<double, 7> IKresult = franka_IK_EE_CC(array16, robot->getq()[6], robot->getqArray());
+            this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
+        }
+        else
+        {
+        }
+    }
+
     //******************************************************************init******************************************************************//
     // init
     template <int _Dofs, typename pubDataType>
@@ -308,12 +373,12 @@ namespace robot_controller
         this->q_hold = robot->getq();
         this->position_hold = robot->getPosition();
         this->orientation_hold = robot->getOrientation();
-        std::cout << "position_hold " << position_hold.transpose() << std::endl;
+
         // tmp
         for (int i = 0; i < _Dofs; i++)
         {
-            controllerParam.jointParam1[i].value = 60;
-            controllerParam.jointParam2[i].value = 5;
+            controllerParam.jointParam1[i].value = 1600;
+            controllerParam.jointParam2[i].value = 40;
         }
         for (int i = 0; i < 6; i++)
         {
@@ -474,16 +539,24 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::calDesireNext(my_robot::Robot<_Dofs> *robot)
     {
+        auto updateX_d = [this]()
+        {
+            Eigen::Matrix4d T = franka_FK(this->controllerLaw->q_d);
+            this->controllerLaw->x_d.head(3) = T.block<3, 1>(0, 3);
+            Eigen::Matrix3d R = T.block<3, 3>(0, 0);
+            Eigen::Vector3d eulerAngles = R.eulerAngles(2, 1, 0);
+            this->controllerLaw->x_d.tail(3) = eulerAngles;
+            this->nowControllerStatus = RunStatus::wait_;
+        };
         switch (this->nowControllerStatus)
         {
         case RunStatus::wait_:
-            this->controllerLaw->calWaitDesireNext(this->q_hold);
+            this->controllerLaw->calWaitDesireNext();
             break;
         case RunStatus::run_:
             if (q_dRunQueue[0].empty())
             {
-                this->q_hold = robot->getq();
-                this->nowControllerStatus = RunStatus::wait_;
+                updateX_d();
                 break;
             }
             this->controllerLaw->calRunStopDesireNext(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
@@ -491,23 +564,28 @@ namespace robot_controller
         case RunStatus::stop_:
             if (q_dStopQueue[0].empty())
             {
-                this->q_hold = robot->getq();
-                this->nowControllerStatus = RunStatus::wait_;
+                updateX_d();
                 break;
             }
             this->controllerLaw->calRunStopDesireNext(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue);
             break;
         case RunStatus::jog_:
-            this->calJonitJogMove(robot);
+            if (this->runTaskSpace == TaskSpace::jointSpace)
+                this->calJointJogMove(robot);
+            else
+                this->calCartesianJogMove(robot);
             break;
         case RunStatus::jogStop_:
-            if (this->controllerLaw->dq_d[jogNum - 1] == 0)
+            if ((this->controllerLaw->dq_d[jogNum - 1] == 0 && this->runTaskSpace == TaskSpace::jointSpace) ||
+                (this->controllerLaw->dx_d[jogNum - 1] == 0 && this->runTaskSpace == TaskSpace::cartesianSpace))
             {
-                this->q_hold = robot->getq();
-                this->nowControllerStatus = RunStatus::wait_;
+                updateX_d();
                 break;
             }
-            this->calJonitJogStop(robot);
+            if (this->runTaskSpace == TaskSpace::jointSpace)
+                this->calJointJogStop(robot);
+            else
+                this->calCartesianJogStop(robot);
             break;
         default:
             printf("calDesireNext error\n");
@@ -547,11 +625,15 @@ namespace robot_controller
         }
         if (time % recordPeriod != 0)
             return;
-
         static const char *n = "\n";
+        // std::array<double, 7> tmp;
+        // tmp = franka_IK_EE_CC(robot->getT02EEArray(), robot->getq()[6], robot->getqArray());
         // this->myfile << "time: " << this->time << "_" << n;
-        // this->myfile << "q0: " << robot->getq0().transpose() << "\n";
         // this->myfile << "q: " << robot->getq().transpose() << "\n";
+        // this->myfile << "tmp: " << tmp[0] << "  " << tmp[1] << "  " << tmp[2] << "  " << tmp[3]
+        //              << " " << tmp[4] << "  " << tmp[5] << "  " << tmp[6] << "\n";
+        // this->myfile << "q0: " << robot->getq0().transpose() << "\n";
+
         // this->myfile << "dq: " << robot->getdq().transpose() << "\n";
         // this->myfile << "q_d: " << this->controllerLaw->q_d.transpose() << "\n";
         // this->myfile << "dq_d: " << this->controllerLaw->dq_d.transpose() << "\n";
@@ -604,17 +686,16 @@ namespace robot_controller
 
             param_debug.tau_d[i] = this->controllerLaw->tau_d[i];
         }
-        // for (int i = 0; i < 3; i++)
-        // {
-        //     param_debug.position[i] = robot->getPosition()[i];
-        //     param_debug.dposition[i] = robot->getdPosition()[i];
-        //     param_debug.position_d[i] = this->controllerLaw->position_d[i];
-        //     param_debug.dposition_d[i] = this->controllerLaw->dposition_d[i];
+        for (int i = 0; i < 3; i++)
+        {
+            param_debug.position[i] = robot->getPosition()[i];
+            param_debug.dposition[i] = robot->getdPosition()[i];
+            param_debug.position_d[i] = this->controllerLaw->x_d[i];
 
-        //     param_debug.cartesianError[i] = this->controllerLaw->cartesianError[i];
-        //     // param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
-        //     // param_debug.orientation_d[i] = this->controllerLaw->orientation_d.toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
-        // }
+            param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
+            param_debug.dorientation[i] = robot->getdOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
+            param_debug.orientation_d[i] = this->controllerLaw->x_d[i + 3];
+        }
 
         // for (int i = 0; i < 6; i++)
         // {

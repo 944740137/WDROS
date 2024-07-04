@@ -30,6 +30,8 @@ namespace my_robot
         Eigen::Quaterniond dorientation;
 
         Eigen::Affine3d TO2E;
+        std::array<double, 16> T02EEArray;
+        std::array<double, 7> qArray;
         Eigen::Matrix<double, _Dofs, 1> tau;
 
         // pino
@@ -55,8 +57,8 @@ namespace my_robot
         Eigen::Matrix<double, _Dofs, 1> dqLimit;   /* = {2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100}; */
         Eigen::Matrix<double, _Dofs, 1> ddqLimit;  /* = {15, 7.5, 10, 12.5, 15, 20, 20}; */
         Eigen::Matrix<double, _Dofs, 1> dddqLimit; /* = {1500, 750, 1000, 1250, 1500, 2000, 2000}; */
-        double dposLimit = 0.5;
-        double ddposLimit = 5;
+        double dposLimit = 0.4;
+        double ddposLimit = 4;
         double dddposLimit = 20;
         double doriLimit = 1;
         double ddoriLimit = 10;
@@ -80,6 +82,7 @@ namespace my_robot
         // get kinematics
         const Eigen::Matrix<double, _Dofs, 1> &getq0();
         const Eigen::Matrix<double, _Dofs, 1> &getq();
+        const std::array<double, 7> &getqArray();
         const Eigen::Matrix<double, _Dofs, 1> &getdq();
 
         const Eigen::Vector3d &getPosition0();
@@ -89,13 +92,14 @@ namespace my_robot
         const Eigen::Vector3d &getdPosition();
         const Eigen::Quaterniond &getdOrientation();
         const Eigen::Affine3d &getT();
+        const std::array<double, 16> &getT02EEArray();
         const Eigen::Matrix<double, _Dofs, 1> &getTorque();
 
         // set kinematics
         void setq0(const Eigen::Matrix<double, _Dofs, 1> &q);
         void setPosAndOri0(const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation);
-        void updateJointData(const Eigen::Matrix<double, _Dofs, 1> &q, const Eigen::Matrix<double, _Dofs, 1> &theta, const Eigen::Matrix<double, _Dofs, 1> &dq, const Eigen::Matrix<double, _Dofs, 1> &tau);
-        void updateEndeffectorData(const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E);
+        void updateJointData(const Eigen::Matrix<double, _Dofs, 1> &q, const std::array<double, 7> &qArray, const Eigen::Matrix<double, _Dofs, 1> &theta, const Eigen::Matrix<double, _Dofs, 1> &dq, const Eigen::Matrix<double, _Dofs, 1> &tau);
+        void updateEndeffectorData(const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, const std::array<double, 16> &T02EEArray);
 
         // other dyn api
         void setExternM(const Eigen::Matrix<double, _Dofs, _Dofs> &externM);
@@ -213,6 +217,11 @@ namespace my_robot
         return this->q;
     }
     template <int _Dofs>
+    const std::array<double, 7> &Robot<_Dofs>::getqArray()
+    {
+        return this->qArray;
+    }
+    template <int _Dofs>
     const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getdq()
     {
         return this->dq;
@@ -243,6 +252,11 @@ namespace my_robot
         return this->TO2E;
     }
     template <int _Dofs>
+    const std::array<double, 16> &Robot<_Dofs>::getT02EEArray()
+    {
+        return this->T02EEArray;
+    }
+    template <int _Dofs>
     const Eigen::Matrix<double, _Dofs, 1> &Robot<_Dofs>::getTorque()
     {
         return this->tau;
@@ -250,15 +264,16 @@ namespace my_robot
 
     // 传感器数据更新
     template <int _Dofs>
-    void Robot<_Dofs>::updateJointData(const Eigen::Matrix<double, _Dofs, 1> &q, const Eigen::Matrix<double, _Dofs, 1> &theta, const Eigen::Matrix<double, _Dofs, 1> &dq, const Eigen::Matrix<double, _Dofs, 1> &tau)
+    void Robot<_Dofs>::updateJointData(const Eigen::Matrix<double, _Dofs, 1> &q, const std::array<double, 7> &qArray, const Eigen::Matrix<double, _Dofs, 1> &theta, const Eigen::Matrix<double, _Dofs, 1> &dq, const Eigen::Matrix<double, _Dofs, 1> &tau)
     {
         this->q = q;
+        this->qArray = qArray;
         this->theta = theta;
         this->dq = dq;
         this->tau = tau;
     }
     template <int _Dofs>
-    void Robot<_Dofs>::updateEndeffectorData(const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E)
+    void Robot<_Dofs>::updateEndeffectorData(const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, const std::array<double, 16> &T02EEArray)
     {
         this->position = position;
         this->orientation = orientation;
@@ -268,6 +283,7 @@ namespace my_robot
         this->dorientation = Eigen::AngleAxisd(tmp[0], Eigen::Vector3d::UnitX()) * Eigen::AngleAxisd(tmp[1], Eigen::Vector3d::UnitY()) * Eigen::AngleAxisd(tmp[2], Eigen::Vector3d::UnitZ());
 
         this->TO2E = TO2E;
+        this->T02EEArray = T02EEArray;
     }
 
     // pino dyn

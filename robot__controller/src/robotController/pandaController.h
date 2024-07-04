@@ -15,13 +15,13 @@ typedef ComputedTorqueMethod<DIM> PandaComputedTorqueMethodController;
 extern Robot7 *pPanda;
 extern PandaController *pController;
 void pandaInit(std::string &urdfPath, std::string &TcpName);
-void pandaStart(const Eigen::Matrix<double, DIM, 1> &q, const Eigen::Matrix<double, DIM, 1> &theta,
+void pandaStart(const Eigen::Matrix<double, DIM, 1> &q, const std::array<double, 7> &qArray, const Eigen::Matrix<double, DIM, 1> &theta,
                 const Eigen::Matrix<double, DIM, 1> &dq, const Eigen::Matrix<double, DIM, 1> &tau,
-                const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, int recordPeriod);
+                const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation, const Eigen::Affine3d &TO2E, const std::array<double, 16> &T02EEarray, int recordPeriod);
 
-void pandaRun(const Eigen::Matrix<double, DIM, 1> &q, const Eigen::Matrix<double, DIM, 1> &dq, const Eigen::Matrix<double, DIM, 1> &theta,
+void pandaRun(const Eigen::Matrix<double, DIM, 1> &q, const std::array<double, 7> &qArray, const Eigen::Matrix<double, DIM, 1> &dq, const Eigen::Matrix<double, DIM, 1> &theta,
               const Eigen::Matrix<double, DIM, 1> &tau, const Eigen::Vector3d &position, const Eigen::Quaterniond &orientation,
-              const Eigen::Affine3d &TO2E, Eigen::Matrix<double, DIM, 1> &tau_d, robot_controller::paramForDebug &param_debug,
+              const Eigen::Affine3d &TO2E, const std::array<double, 16> &T02EEarray, Eigen::Matrix<double, DIM, 1> &tau_d, robot_controller::paramForDebug &param_debug,
               Eigen::Matrix<double, DIM, 1> &q_d);
 
 void pandaGetDyn(const Eigen::Matrix<double, 7, 7> &M, const Eigen::Matrix<double, 7, 1> &c,

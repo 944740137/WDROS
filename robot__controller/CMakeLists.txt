@@ -77,6 +77,8 @@ catkin_package(
 #生成库
 add_library(robot_controller
   src/algorithm/pandaDynLibManager.cpp
+  src/algorithm/frankaIK.cpp
+  src/algorithm/frankaFK.cpp
   src/communication/communication.cpp
   src/robotController/pandaController.cpp
   src/rosController/pandaRosController.cpp

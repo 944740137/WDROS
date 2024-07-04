@@ -15,8 +15,8 @@ float64[3] position_d
 float64[3] dposition_d
 float64[3] ddposition_d
 
-# float64[3] orientation
-# float64[3] dorientation
-# float64[3] orientation_d
+float64[3] orientation
+float64[3] dorientation
+float64[3] orientation_d
 # float64[3] dorientation_d
 # float64[3] ddorientation_d
