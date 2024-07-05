@@ -380,11 +380,6 @@ namespace robot_controller
             controllerParam.jointParam1[i].value = 1600;
             controllerParam.jointParam2[i].value = 40;
         }
-        for (int i = 0; i < 6; i++)
-        {
-            controllerParam.cartesianParam1[i].value = 200;
-            controllerParam.cartesianParam2[i].value = 2;
-        }
 
         // 建立通信 建立数据映射
         if (this->communicationModel.createConnect((key_t)SM_ID, (key_t)MS_ID, this->robotDataBuff,
@@ -494,12 +489,9 @@ namespace robot_controller
             changePlanner(this->plannerType_d);
             this->plannerType = this->plannerType_d;
         }
-        if (this->runTaskSpace != this->runTaskSpace_d) // 切换坐标系：关节/笛卡尔
+        if (this->runTaskSpace != this->runTaskSpace_d && this->nowControllerStatus == RunStatus::wait_) // 切换坐标系：关节/笛卡尔
         {
-            if (this->controllerLaw.get() != nullptr)
-            {
-                this->runTaskSpace = this->runTaskSpace_d;
-            }
+            this->runTaskSpace = this->runTaskSpace_d;
         }
         if (this->jogSpeed != this->jogSpeed_d) // 更改点动速度
         {
@@ -546,7 +538,6 @@ namespace robot_controller
             Eigen::Matrix3d R = T.block<3, 3>(0, 0);
             Eigen::Vector3d eulerAngles = R.eulerAngles(2, 1, 0);
             this->controllerLaw->x_d.tail(3) = eulerAngles;
-            this->nowControllerStatus = RunStatus::wait_;
         };
         switch (this->nowControllerStatus)
         {
@@ -556,7 +547,9 @@ namespace robot_controller
         case RunStatus::run_:
             if (q_dRunQueue[0].empty())
             {
-                updateX_d();
+                if (this->runTaskSpace == TaskSpace::cartesianSpace)
+                    updateX_d();
+                this->nowControllerStatus = RunStatus::wait_;
                 break;
             }
             this->controllerLaw->calRunStopDesireNext(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
@@ -564,7 +557,9 @@ namespace robot_controller
         case RunStatus::stop_:
             if (q_dStopQueue[0].empty())
             {
-                updateX_d();
+                if (this->runTaskSpace == TaskSpace::cartesianSpace)
+                    updateX_d();
+                this->nowControllerStatus = RunStatus::wait_;
                 break;
             }
             this->controllerLaw->calRunStopDesireNext(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue);
@@ -579,7 +574,9 @@ namespace robot_controller
             if ((this->controllerLaw->dq_d[jogNum - 1] == 0 && this->runTaskSpace == TaskSpace::jointSpace) ||
                 (this->controllerLaw->dx_d[jogNum - 1] == 0 && this->runTaskSpace == TaskSpace::cartesianSpace))
             {
-                updateX_d();
+                if (this->runTaskSpace == TaskSpace::cartesianSpace)
+                    updateX_d();
+                this->nowControllerStatus = RunStatus::wait_;
                 break;
             }
             if (this->runTaskSpace == TaskSpace::jointSpace)
