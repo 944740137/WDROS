@@ -60,9 +60,9 @@ namespace my_robot
         double dposLimit = 0.4;
         double ddposLimit = 4;
         double dddposLimit = 20;
-        double doriLimit = 1;
-        double ddoriLimit = 10;
-        double dddoriLimit = 100;
+        double doriLimit = 0.4;
+        double ddoriLimit = 4;
+        double dddoriLimit = 12;
 
         Robot(const Robot &) = delete;
         void operator=(const Robot &) = delete;

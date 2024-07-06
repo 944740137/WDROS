@@ -321,15 +321,48 @@ namespace robot_controller
                 calJogMovePlan(this->jogMoveFlag, this->cycleTime, this->jogDir, dddposLimit, ddposLimit, dposLimit, this->controllerLaw->x_d[jogNum - 1],
                                this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
             }
-            std::array<double, 16> array16 = robot->getT02EEArray();
-            array16[jogNum + 11] = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
-            std::array<double, 7> IKresult = franka_IK_EE_CC(array16, robot->getq()[6], robot->getqArray());
+            Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
+            TO2EE(jogNum - 1, 3) = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
+            std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
             this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
         }
         else
         {
+            double dddoriLimit = robot->dddoriLimit;
+            double ddoriLimit = robot->ddoriLimit;
+            double doriLimit = this->jogSpeed * robot->doriLimit;
+            if (this->jogMoveFlag)
+            {
+                calJogMovePlan(this->jogMoveFlag, this->cycleTime, this->jogDir, dddoriLimit, ddoriLimit, doriLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+                this->jogMoveFlag = false;
+            }
+            else
+            {
+                calJogMovePlan(this->jogMoveFlag, this->cycleTime, this->jogDir, dddoriLimit, ddoriLimit, doriLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+            }
+            Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
+            // Eigen::Matrix<double, 3, 1> eulerAngle = robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2);
+            // eulerAngle[jogNum - 1 - 3] = this->controllerLaw->x_d[jogNum - 1];
+            Eigen::AngleAxisd Rx(Eigen::AngleAxisd(this->controllerLaw->x_d(3), Eigen::Vector3d::UnitX()));
+            Eigen::AngleAxisd Ry(Eigen::AngleAxisd(this->controllerLaw->x_d(4), Eigen::Vector3d::UnitY()));
+            Eigen::AngleAxisd Rz(Eigen::AngleAxisd(this->controllerLaw->x_d(5), Eigen::Vector3d::UnitZ()));
+            Eigen::Matrix3d R;
+            R = Rx * Ry * Rz;
+            TO2EE.block(0, 0, 3, 3) = R;
+            std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
+            this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
+            std::cout << "time " << this->time << std::endl;
+            std::cout << "jogNum " << jogNum << std::endl;
+            std::cout << "move x_d" << this->controllerLaw->x_d.transpose() << std::endl;
+            std::cout << "move TO2EE" << std::endl;
+            std::cout << TO2EE << std::endl;
+            std::cout << "move q_d" << this->controllerLaw->q_d.transpose() << std::endl;
         }
     }
     template <int _Dofs, typename pubDataType>
@@ -339,7 +372,6 @@ namespace robot_controller
         {
             double dddposLimit = robot->dddposLimit;
             double ddposLimit = robot->ddposLimit;
-            double dposLimit = this->jogSpeed * robot->dposLimit;
             if (this->jogStopFlag)
             {
                 calJogStopPlan(jogStopFlag, cycleTime, dddposLimit, ddposLimit, this->controllerLaw->x_d[jogNum - 1],
@@ -351,15 +383,43 @@ namespace robot_controller
                 calJogStopPlan(jogStopFlag, cycleTime, dddposLimit, ddposLimit, this->controllerLaw->x_d[jogNum - 1],
                                this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
             }
-            std::array<double, 16> array16 = robot->getT02EEArray();
-            array16[jogNum + 11] = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
-            std::array<double, 7> IKresult = franka_IK_EE_CC(array16, robot->getq()[6], robot->getqArray());
+            Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
+            TO2EE(jogNum - 1, 3) = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
+            std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
             this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
         }
         else
         {
+            double dddoriLimit = robot->dddoriLimit;
+            double ddoriLimit = robot->ddoriLimit;
+            if (this->jogStopFlag)
+            {
+                calJogStopPlan(jogStopFlag, cycleTime, dddoriLimit, ddoriLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+                this->jogStopFlag = false;
+            }
+            else
+            {
+                calJogStopPlan(jogStopFlag, cycleTime, dddoriLimit, ddoriLimit, this->controllerLaw->x_d[jogNum - 1],
+                               this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
+            }
+            Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
+            // Eigen::Matrix<double, 3, 1> eulerAngle = robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2);
+            // eulerAngle[jogNum - 1 - 3] = this->controllerLaw->x_d[jogNum - 1];
+            Eigen::AngleAxisd Rx(Eigen::AngleAxisd(this->controllerLaw->x_d(3), Eigen::Vector3d::UnitX()));
+            Eigen::AngleAxisd Ry(Eigen::AngleAxisd(this->controllerLaw->x_d(4), Eigen::Vector3d::UnitY()));
+            Eigen::AngleAxisd Rz(Eigen::AngleAxisd(this->controllerLaw->x_d(5), Eigen::Vector3d::UnitZ()));
+            Eigen::Matrix3d R;
+            R = Rx * Ry * Rz;
+            TO2EE.block(0, 0, 3, 3) = R;
+            std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
+            this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+            this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
+            std::cout << "stop x_d" << this->controllerLaw->x_d.transpose() << std::endl;
+            std::cout << "stop q_d" << this->controllerLaw->q_d.transpose() << std::endl;
         }
     }
 
@@ -377,7 +437,7 @@ namespace robot_controller
         // tmp
         for (int i = 0; i < _Dofs; i++)
         {
-            controllerParam.jointParam1[i].value = 1600;
+            controllerParam.jointParam1[i].value = 800;
             controllerParam.jointParam2[i].value = 40;
         }
 
@@ -432,7 +492,7 @@ namespace robot_controller
         for (int i = 0; i < 3; i++)
         {
             this->robotDataBuff->position[i] = robot->getPosition()[i];
-            this->robotDataBuff->orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i] * 180.0 / M_PI;
+            this->robotDataBuff->orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2)[i] * 180.0 / M_PI;
         }
         this->controllerStateBUff->controllerStatus = this->nowControllerStatus;
 
@@ -536,7 +596,7 @@ namespace robot_controller
             Eigen::Matrix4d T = franka_FK(this->controllerLaw->q_d);
             this->controllerLaw->x_d.head(3) = T.block<3, 1>(0, 3);
             Eigen::Matrix3d R = T.block<3, 3>(0, 0);
-            Eigen::Vector3d eulerAngles = R.eulerAngles(2, 1, 0);
+            Eigen::Vector3d eulerAngles = R.eulerAngles(0, 1, 2);
             this->controllerLaw->x_d.tail(3) = eulerAngles;
         };
         switch (this->nowControllerStatus)
@@ -547,7 +607,7 @@ namespace robot_controller
         case RunStatus::run_:
             if (q_dRunQueue[0].empty())
             {
-                if (this->runTaskSpace == TaskSpace::cartesianSpace)
+                if (this->runTaskSpace == TaskSpace::jointSpace)
                     updateX_d();
                 this->nowControllerStatus = RunStatus::wait_;
                 break;
@@ -557,7 +617,7 @@ namespace robot_controller
         case RunStatus::stop_:
             if (q_dStopQueue[0].empty())
             {
-                if (this->runTaskSpace == TaskSpace::cartesianSpace)
+                if (this->runTaskSpace == TaskSpace::jointSpace)
                     updateX_d();
                 this->nowControllerStatus = RunStatus::wait_;
                 break;
@@ -574,7 +634,7 @@ namespace robot_controller
             if ((this->controllerLaw->dq_d[jogNum - 1] == 0 && this->runTaskSpace == TaskSpace::jointSpace) ||
                 (this->controllerLaw->dx_d[jogNum - 1] == 0 && this->runTaskSpace == TaskSpace::cartesianSpace))
             {
-                if (this->runTaskSpace == TaskSpace::cartesianSpace)
+                if (this->runTaskSpace == TaskSpace::jointSpace)
                     updateX_d();
                 this->nowControllerStatus = RunStatus::wait_;
                 break;
@@ -625,7 +685,7 @@ namespace robot_controller
         static const char *n = "\n";
         // std::array<double, 7> tmp;
         // tmp = franka_IK_EE_CC(robot->getT02EEArray(), robot->getq()[6], robot->getqArray());
-        // this->myfile << "time: " << this->time << "_" << n;
+        this->myfile << "time: " << this->time << "_" << n;
         // this->myfile << "q: " << robot->getq().transpose() << "\n";
         // this->myfile << "tmp: " << tmp[0] << "  " << tmp[1] << "  " << tmp[2] << "  " << tmp[3]
         //              << " " << tmp[4] << "  " << tmp[5] << "  " << tmp[6] << "\n";
@@ -636,11 +696,13 @@ namespace robot_controller
         // this->myfile << "dq_d: " << this->controllerLaw->dq_d.transpose() << "\n";
         // this->myfile << "ddq_d: " << this->controllerLaw->ddq_d.transpose() << "\n";
         // this->myfile << "Position0: " << robot->getPosition0().transpose() << "\n";
-        // this->myfile << "Orientation0: " << robot->getOrientation0().toRotationMatrix().eulerAngles(2, 1, 0).transpose() << "\n";
+        // this->myfile << "Orientation0: " << robot->getOrientation0().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
+        // this->myfile << "this->controllerLaw->x_d: " << this->controllerLaw->x_d.transpose() << "\n";
         // this->myfile << "Position: " << robot->getPosition().transpose() << "\n";
-        // this->myfile << "Orientation: " << robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0).transpose() << "\n";
+        this->myfile << "Orientation: " << robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
+        // this->myfile << "orientation_hold: " << this->orientation_hold.toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
         // this->myfile << "Position: " << robot->getdPosition().transpose() << "\n";
-        // this->myfile << "Orientation: " << robot->getdOrientation().toRotationMatrix().eulerAngles(2, 1, 0).transpose() << "\n";
+        // this->myfile << "Orientation: " << robot->getdOrientation().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
         // this->myfile << "T:" << n;
         // this->myfile << robot->getT().matrix() << "\n";
         // this->myfile << "M:" << n;
@@ -689,8 +751,8 @@ namespace robot_controller
             param_debug.dposition[i] = robot->getdPosition()[i];
             param_debug.position_d[i] = this->controllerLaw->x_d[i];
 
-            param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
-            param_debug.dorientation[i] = robot->getdOrientation().toRotationMatrix().eulerAngles(2, 1, 0)[i];
+            param_debug.orientation[i] = robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2)[i];
+            param_debug.dorientation[i] = robot->getdOrientation().toRotationMatrix().eulerAngles(0, 1, 2)[i];
             param_debug.orientation_d[i] = this->controllerLaw->x_d[i + 3];
         }
 

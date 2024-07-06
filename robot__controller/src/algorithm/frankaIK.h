@@ -14,7 +14,7 @@ std::array< std::array<double, 7>, 4 > franka_IK_EE ( std::array<double, 16> O_T
                                                       std::array<double, 7> q_actual_array );
 
 // "Case-Consistent" inverse kinematics w.r.t. End Effector Frame (using Franka Hand data)
-std::array<double, 7> franka_IK_EE_CC(std::array<double, 16> O_T_EE_array,
+std::array<double, 7> franka_IK_EE_CC(Eigen::Matrix<double, 4, 4> &O_T_EE,
                                       double q7,
                                       std::array<double, 7> q_actual_array);
 void NewFunction();

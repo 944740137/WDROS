@@ -121,7 +121,7 @@ void ControllerLaw<_Dofs>::initDesire(Eigen::Matrix<double, _Dofs, 1> &q_hold, c
 {
     this->q_d = q_hold;
     this->x_d.segment<3>(0) = position_hold;
-    this->x_d.segment<3>(3) = orientation_hold.toRotationMatrix().eulerAngles(0, 1, 2);
+    this->x_d.segment<3>(3) = orientation_hold.toRotationMatrix().eulerAngles(0, 1, 2); // xyz 欧拉角 R(x)*R(y)*R(z)
 }
 template <int _Dofs>
 void ControllerLaw<_Dofs>::calWaitDesireNext()
@@ -259,10 +259,10 @@ void Backstepping<_Dofs>::setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<doub
 {
     // note: 父类是抽象模板类，子类使用其成员需显式指定：this->或base::
     this->e1 = this->jointError;
-    this->e2 = this->djointError + this->jointK1 * e1;
-    this->r = this->dq_d + this->jointK1 * e1;
-    this->dr = this->ddq_d + this->jointK1 * this->djointError;
-    this->tau_d << robot->getExternM() * (this->dr) + robot->getC() * (this->dr) /* + G */ + this->jointK2 * this->e2 + this->e1;
+    this->e2 = this->djointError + (this->jointK1 / 10.0) * e1;
+    this->r = this->dq_d + (this->jointK1 / 10.0) * e1;
+    this->dr = this->ddq_d + (this->jointK1 / 10.0) * this->djointError;
+    this->tau_d << robot->getExternM() * (this->dr) + robot->getC() * (this->dr) /* + G */ + (this->jointK2 / 10.0) * this->e2 + this->e1;
     tau_d_in = this->tau_d;
 }
 
