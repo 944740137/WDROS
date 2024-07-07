@@ -82,11 +82,10 @@ public:
     virtual ~ControllerLaw();
 
     void calError(my_robot::Robot<_Dofs> *robot);
-    void initDesire(Eigen::Matrix<double, _Dofs, 1> &q_hold, const Eigen::Vector3d &position_hold, const Eigen::Quaterniond &orientation_hold);
+    void initDesire(const Eigen::Matrix<double, _Dofs, 1> &q_hold, const Eigen::Vector3d &position_hold, const Eigen::Quaterniond &orientation_hold);
     void calWaitDesireNext();
     void calRunStopDesireNext(std::vector<std::queue<double>> &q_dQueue, std::vector<std::queue<double>> &dq_dQueue,
                               std::vector<std::queue<double>> &ddq_dQueue);
-    void setNullSpaceDesire(Eigen::Matrix<double, _Dofs, 1> &q_ns);
 
     virtual void setU(my_robot::Robot<_Dofs> *robot, Eigen::Matrix<double, _Dofs, 1> &tau_d) = 0;
     virtual void dynamicSetParameter(const ControllerParamBase<_Dofs> &config, unsigned int time) = 0;
@@ -117,7 +116,7 @@ void ControllerLaw<_Dofs>::calError(my_robot::Robot<_Dofs> *robot)
     this->djointError = this->dq_d - robot->getdq();
 }
 template <int _Dofs>
-void ControllerLaw<_Dofs>::initDesire(Eigen::Matrix<double, _Dofs, 1> &q_hold, const Eigen::Vector3d &position_hold, const Eigen::Quaterniond &orientation_hold)
+void ControllerLaw<_Dofs>::initDesire(const Eigen::Matrix<double, _Dofs, 1> &q_hold, const Eigen::Vector3d &position_hold, const Eigen::Quaterniond &orientation_hold)
 {
     this->q_d = q_hold;
     this->x_d.segment<3>(0) = position_hold;
@@ -144,11 +143,6 @@ void ControllerLaw<_Dofs>::calRunStopDesireNext(std::vector<std::queue<double>> 
     }
 }
 
-template <int _Dofs>
-void ControllerLaw<_Dofs>::setNullSpaceDesire(Eigen::Matrix<double, _Dofs, 1> &q_ns)
-{
-    this->q_nullSapce = q_ns;
-}
 //
 //
 // 计算力矩控制器

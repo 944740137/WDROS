@@ -1,6 +1,6 @@
 // #pragma once
 #include "controllerLaw/controllerLaw.hpp"
-#include "planner/planner.hpp"
+#include "planner/runPlanner.hpp"
 #include "planner/jogPlanner.h"
 #include "algorithm/frankaIK.h"
 #include "algorithm/frankaFK.h"
@@ -19,22 +19,18 @@ namespace robot_controller
 
     public:
         // debug，绘图
-        int recordPeriod = 1;                   // 数据记录周期
-        unsigned int time = 0;                  // 当前时刻
-        std::ofstream myfile;                   // 记录文件io对象
-        double filterParams = 0.005;            // 调参滤波参数
-        const double cycleTime = 0.001;         // 运行周期0.001s
-        Eigen::Matrix<double, _Dofs, 1> q_hold; // 维持位置
-        Eigen::Vector3d position_hold;
-        Eigen::Quaterniond orientation_hold;
+        int recordPeriod = 1;           // 数据记录周期
+        unsigned int time = 0;          // 当前时刻
+        std::ofstream myfile;           // 记录文件io对象
+        double filterParams = 0.005;    // 调参滤波参数
+        const double cycleTime = 0.001; // 运行周期0.001s
 
         // 点动参数
         bool jogSign = false;
         int jogNum = 0;      // 点动轴
-        int jogDir = 0;      // 点动轴
+        int jogDir = 0;      // 点动方向
         double jogSpeed = 0; // 0-1
         double jogSpeed_d = 0;
-
         bool jogMoveFlag = false;
         bool jogStopFlag = false;
 
@@ -46,7 +42,6 @@ namespace robot_controller
 
         // 坐标系
         TaskSpace runTaskSpace = TaskSpace::jointSpace;
-        TaskSpace runTaskSpace_d = TaskSpace::jointSpace;
 
         // 急停参数
         bool newStop = false;
@@ -100,7 +95,7 @@ namespace robot_controller
         void setRecord(int recordPeriod);
         const std::string &getControllerLawName();
         void dynamicSetParameter();
-        void changeControllerLaw(ControllerLawType type);
+        void changeControllerLaw(ControllerLawType type, my_robot::Robot<_Dofs> *robot);
         void changePlanner(PlannerType type);
         void initStateToMaster();
         void calRunQueue(my_robot::Robot<_Dofs> *robot);
@@ -138,8 +133,7 @@ namespace robot_controller
     {
     }
     template <int _Dofs, typename pubDataType>
-    Controller<_Dofs, pubDataType>::Controller() : q_calQueue(Eigen::Matrix<double, _Dofs, 1>::Zero()),
-                                                   q_hold(Eigen::Matrix<double, _Dofs, 1>::Zero())
+    Controller<_Dofs, pubDataType>::Controller() : q_calQueue(Eigen::Matrix<double, _Dofs, 1>::Zero())
     {
     }
 
@@ -157,12 +151,12 @@ namespace robot_controller
             return this->controllerLaw->controllerLawName;
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::changeControllerLaw(ControllerLawType type)
+    void Controller<_Dofs, pubDataType>::changeControllerLaw(ControllerLawType type, my_robot::Robot<_Dofs> *robot)
     {
         if (!newControllerLaw(controllerLaw, type))
             printf("ControllerLaw create Error\n");
         dynamicSetParameter();
-        this->controllerLaw->initDesire(this->q_hold, this->position_hold, this->orientation_hold);
+        this->controllerLaw->initDesire(robot->getq(), robot->getPosition(), robot->getOrientation());
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::changePlanner(PlannerType type)
@@ -345,8 +339,6 @@ namespace robot_controller
                                this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
             }
             Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
-            // Eigen::Matrix<double, 3, 1> eulerAngle = robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2);
-            // eulerAngle[jogNum - 1 - 3] = this->controllerLaw->x_d[jogNum - 1];
             Eigen::AngleAxisd Rx(Eigen::AngleAxisd(this->controllerLaw->x_d(3), Eigen::Vector3d::UnitX()));
             Eigen::AngleAxisd Ry(Eigen::AngleAxisd(this->controllerLaw->x_d(4), Eigen::Vector3d::UnitY()));
             Eigen::AngleAxisd Rz(Eigen::AngleAxisd(this->controllerLaw->x_d(5), Eigen::Vector3d::UnitZ()));
@@ -357,12 +349,6 @@ namespace robot_controller
             this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
-            std::cout << "time " << this->time << std::endl;
-            std::cout << "jogNum " << jogNum << std::endl;
-            std::cout << "move x_d" << this->controllerLaw->x_d.transpose() << std::endl;
-            std::cout << "move TO2EE" << std::endl;
-            std::cout << TO2EE << std::endl;
-            std::cout << "move q_d" << this->controllerLaw->q_d.transpose() << std::endl;
         }
     }
     template <int _Dofs, typename pubDataType>
@@ -406,8 +392,6 @@ namespace robot_controller
                                this->controllerLaw->dx_d[jogNum - 1], this->controllerLaw->ddx_d[jogNum - 1]);
             }
             Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
-            // Eigen::Matrix<double, 3, 1> eulerAngle = robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2);
-            // eulerAngle[jogNum - 1 - 3] = this->controllerLaw->x_d[jogNum - 1];
             Eigen::AngleAxisd Rx(Eigen::AngleAxisd(this->controllerLaw->x_d(3), Eigen::Vector3d::UnitX()));
             Eigen::AngleAxisd Ry(Eigen::AngleAxisd(this->controllerLaw->x_d(4), Eigen::Vector3d::UnitY()));
             Eigen::AngleAxisd Rz(Eigen::AngleAxisd(this->controllerLaw->x_d(5), Eigen::Vector3d::UnitZ()));
@@ -418,8 +402,6 @@ namespace robot_controller
             this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
-            std::cout << "stop x_d" << this->controllerLaw->x_d.transpose() << std::endl;
-            std::cout << "stop q_d" << this->controllerLaw->q_d.transpose() << std::endl;
         }
     }
 
@@ -430,9 +412,6 @@ namespace robot_controller
     {
         // 设置数据记录周期
         setRecord(this->recordPeriod);
-        this->q_hold = robot->getq();
-        this->position_hold = robot->getPosition();
-        this->orientation_hold = robot->getOrientation();
 
         // tmp
         for (int i = 0; i < _Dofs; i++)
@@ -444,9 +423,7 @@ namespace robot_controller
         // 建立通信 建立数据映射
         if (this->communicationModel.createConnect((key_t)SM_ID, (key_t)MS_ID, this->robotDataBuff,
                                                    this->controllerCommandBUff, this->controllerStateBUff))
-        {
             printf("通信模型建立成功\n");
-        }
 
         // init state
         this->initStateToMaster();
@@ -455,7 +432,7 @@ namespace robot_controller
         this->controllerCommandBUff->runSign = false;
         this->controllerCommandBUff->jogSign = false;
         this->controllerCommandBUff->newLimit = false;
-        changeControllerLaw(this->controllerLawType);
+        changeControllerLaw(this->controllerLawType, robot);
         changePlanner(this->plannerType);
     }
 
@@ -480,6 +457,7 @@ namespace robot_controller
 
         if (!this->connectStatus)
             return;
+
         // write
         for (int i = 0; i < _Dofs; i++)
         {
@@ -501,7 +479,6 @@ namespace robot_controller
         this->runSpeed_d = (double)this->controllerCommandBUff->runSpeed_d / 100.0;
         this->controllerLawType_d = this->controllerCommandBUff->controllerLawType_d;
         this->plannerType_d = this->controllerCommandBUff->plannerType_d;
-
         if (this->controllerCommandBUff->newLimit) // 新的限位设置
         {                                          // note: 数组->matrix
             for (int i = 0; i < _Dofs; i++)
@@ -528,7 +505,8 @@ namespace robot_controller
             this->controllerCommandBUff->stopSign = false;
             this->newStop = true;
         }
-        this->runTaskSpace_d = this->controllerCommandBUff->plannerTaskSpace;
+        // 直接赋值
+        this->runTaskSpace = this->controllerCommandBUff->plannerTaskSpace;
         this->jogSign = this->controllerCommandBUff->jogSign;
         this->jogNum = this->controllerCommandBUff->jogNum;
         this->jogDir = this->controllerCommandBUff->jogDir;
@@ -541,17 +519,13 @@ namespace robot_controller
 
         if (this->controllerLawType != this->controllerLawType_d) // 切换控制器
         {
-            changeControllerLaw(this->controllerLawType_d);
+            changeControllerLaw(this->controllerLawType_d, robot);
             this->controllerLawType = this->controllerLawType_d;
         }
         if (this->plannerType != this->plannerType_d) // 切换规划器
         {
             changePlanner(this->plannerType_d);
             this->plannerType = this->plannerType_d;
-        }
-        if (this->runTaskSpace != this->runTaskSpace_d && this->nowControllerStatus == RunStatus::wait_) // 切换坐标系：关节/笛卡尔
-        {
-            this->runTaskSpace = this->runTaskSpace_d;
         }
         if (this->jogSpeed != this->jogSpeed_d) // 更改点动速度
         {
