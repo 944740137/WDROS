@@ -8,8 +8,11 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include "math.h"
+
 static int debug = 0;
+// constexpr double param = 0.0000001;
 namespace robot_controller
 {
     // _Dofs自由度机器人控制器
@@ -37,8 +40,12 @@ namespace robot_controller
         // 运行参数
         bool newPlan = false;
         Eigen::Matrix<double, _Dofs, 1> q_calQueue;
+        Eigen::Matrix<double, 6, 1> x_calQueue;
+        Eigen::Matrix<double, 3, 1> rotationAxis;
+        double rotationAngle = 0;
         double runSpeed = 0;
         double runSpeed_d = 0;
+        Eigen::Matrix<double, 3, 3> R1;
 
         // 坐标系
         TaskSpace runTaskSpace = TaskSpace::jointSpace;
@@ -53,17 +60,17 @@ namespace robot_controller
         std::vector<std::queue<double>> q_dRunQueue{_Dofs};
         std::vector<std::queue<double>> dq_dRunQueue{_Dofs};
         std::vector<std::queue<double>> ddq_dRunQueue{_Dofs};
-        std::vector<std::queue<double>> x_dRunQueue{6};
-        std::vector<std::queue<double>> dx_dRunQueue{6};
-        std::vector<std::queue<double>> ddx_dRunQueue{6};
+        std::vector<std::queue<double>> x_dRunQueue{4};
+        std::vector<std::queue<double>> dx_dRunQueue{4};
+        std::vector<std::queue<double>> ddx_dRunQueue{4};
 
         // 急停队列
         std::vector<std::queue<double>> q_dStopQueue{_Dofs};
         std::vector<std::queue<double>> dq_dStopQueue{_Dofs};
         std::vector<std::queue<double>> ddq_dStopQueue{_Dofs};
-        std::vector<std::queue<double>> x_dStopQueue{6};
-        std::vector<std::queue<double>> dx_dStopQueue{6};
-        std::vector<std::queue<double>> ddx_dStopQueue{6};
+        std::vector<std::queue<double>> x_dStopQueue{4};
+        std::vector<std::queue<double>> dx_dStopQueue{4};
+        std::vector<std::queue<double>> ddx_dStopQueue{4};
 
         // 进程通讯
         bool connectStatus = false;
@@ -80,7 +87,7 @@ namespace robot_controller
 
         // 规划器
         std::unique_ptr<Planner<_Dofs>> jointPlanner;
-        std::unique_ptr<Planner<6>> taskPlanner;
+        std::unique_ptr<Planner<4>> taskPlanner;
         PlannerType plannerType = PlannerType::Quintic_;
         PlannerType plannerType_d = PlannerType::Quintic_;
 
@@ -98,17 +105,21 @@ namespace robot_controller
         void changeControllerLaw(ControllerLawType type, my_robot::Robot<_Dofs> *robot);
         void changePlanner(PlannerType type);
         void initStateToMaster();
-        void calRunQueue(my_robot::Robot<_Dofs> *robot);
-        void calStopQueue(my_robot::Robot<_Dofs> *robot);
+        void calJointRunQueue(my_robot::Robot<_Dofs> *robot);
+        void calJointStopQueue(my_robot::Robot<_Dofs> *robot);
+        void calCartesianRunQueue(my_robot::Robot<_Dofs> *robot);
+        void calCartesianStopQueue(my_robot::Robot<_Dofs> *robot);
         void calJointJogMove(my_robot::Robot<_Dofs> *robot);
         void calJointJogStop(my_robot::Robot<_Dofs> *robot);
         void calCartesianJogMove(my_robot::Robot<_Dofs> *robot);
         void calCartesianJogStop(my_robot::Robot<_Dofs> *robot);
+        bool RtoAxisAngle(Eigen::Matrix3d &R, Eigen::Matrix<double, 3, 1> &axis, double &angle);
+        bool AxisAngletoR(Eigen::Matrix3d &R, Eigen::Matrix<double, 3, 1> &axis, double &angle);
         void startMotion();
         void stopMotion();
         void clearMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
         bool checkMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d);
-
+        void HandleiKFailed();
         // init
         void init(int recordPeriod, my_robot::Robot<_Dofs> *robot);
 
@@ -162,7 +173,9 @@ namespace robot_controller
     void Controller<_Dofs, pubDataType>::changePlanner(PlannerType type)
     {
         if (!newPlanner(this->jointPlanner, type))
-            printf("Planner create Error\n");
+            printf("jointPlanner create Error\n");
+        if (!newPlanner(this->taskPlanner, type))
+            printf("taskPlanner create Error\n");
     }
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::dynamicSetParameter()
@@ -191,7 +204,7 @@ namespace robot_controller
     template <int _Dofs, typename pubDataType>
     void Controller<_Dofs, pubDataType>::clearMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
     {
-        for (int i = 0; i < _Dofs; i++)
+        for (int i = 0; i < q_d.size(); i++)
         {
             std::queue<double>().swap(q_d[i]);
             std::queue<double>().swap(dq_d[i]);
@@ -202,11 +215,11 @@ namespace robot_controller
     bool Controller<_Dofs, pubDataType>::checkMotionQueue(std::vector<std::queue<double>> &q_d, std::vector<std::queue<double>> &dq_d, std::vector<std::queue<double>> &ddq_d)
     {
         int size = 0;
-        for (int i = 0; i < _Dofs; i++)
+        for (int i = 0; i < q_d.size(); i++)
         {
             size = size + q_d[i].size();
         }
-        if ((size / _Dofs) != q_d[0].size())
+        if ((size / q_d.size()) != q_d[0].size())
         {
             this->clearMotionQueue(q_d, dq_d, ddq_d);
             std::cout << "[robotController] 队列长度不一致 清空处理" << std::endl;
@@ -215,7 +228,7 @@ namespace robot_controller
         return true;
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::calRunQueue(my_robot::Robot<_Dofs> *robot)
+    void Controller<_Dofs, pubDataType>::calJointRunQueue(my_robot::Robot<_Dofs> *robot)
     {
         Eigen::Matrix<double, _Dofs, 1> velLimit = this->runSpeed * robot->getdqLimit(); // 这里的velLimit是速度
         Eigen::Matrix<double, _Dofs, 1> accLimit = robot->getddqLimit();
@@ -234,7 +247,7 @@ namespace robot_controller
             this->startMotion();
     }
     template <int _Dofs, typename pubDataType>
-    void Controller<_Dofs, pubDataType>::calStopQueue(my_robot::Robot<_Dofs> *robot)
+    void Controller<_Dofs, pubDataType>::calJointStopQueue(my_robot::Robot<_Dofs> *robot)
     {
         Eigen::Matrix<double, _Dofs, 1> maxAcc = robot->getddqLimit();
         Eigen::Matrix<double, _Dofs, 1> maxJerk = robot->getdddqLimit();
@@ -243,9 +256,9 @@ namespace robot_controller
         Eigen::Matrix<double, _Dofs, 1> ddq = Eigen::Matrix<double, _Dofs, 1>::Zero();
         for (int i = 0; i < _Dofs; i++)
         {
-            q[i] = this->q_dRunQueue[i].front();
-            dq[i] = this->dq_dRunQueue[i].front();
-            ddq[i] = this->ddq_dRunQueue[i].front();
+            q[i] = this->controllerLaw->q_d[i];
+            dq[i] = this->controllerLaw->dq_d[i];
+            ddq[i] = this->controllerLaw->ddq_d[i];
         }
         if (!calStopPlan<_Dofs>(true, this->cycleTime, maxJerk, maxAcc, q, dq, ddq, this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue))
         {
@@ -258,6 +271,134 @@ namespace robot_controller
         else
         {
             this->clearMotionQueue(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
+            this->stopMotion();
+        }
+    }
+    template <int _Dofs, typename pubDataType>
+    bool Controller<_Dofs, pubDataType>::RtoAxisAngle(Eigen::Matrix3d &R, Eigen::Matrix<double, 3, 1> &axis, double &angle)
+    {
+        double r = (R(0, 0) + R(1, 1) + R(2, 2) - 1) / 2;
+        if (std::fabs(r - 1) < param) // 0
+            return false;
+
+        if (std::fabs(r + 1) < param) // pi
+        {
+            angle = M_PI;
+            auto compute_axis = [&](int i, int j, int k)
+            {
+                double val = (R(i, i) + 1) / 2;
+                if (val < param)
+                    val = 0;
+                axis[i] = std::sqrt(val);
+                axis[j] = R(i, j) / (2 * axis[i]);
+                axis[k] = R(i, k) / (2 * axis[i]);
+            };
+            if (std::fabs(R(0, 0)) >= std::max(std::fabs(R(1, 1)), std::fabs(R(2, 2))) && std::fabs(R(0, 0) + 1) > param)
+                compute_axis(0, 1, 2);
+            else if (std::fabs(R(1, 1)) >= std::max(std::fabs(R(0, 0)), std::fabs(R(2, 2))) && std::fabs(R(1, 1) + 1) > param)
+                compute_axis(1, 0, 2);
+            else if (std::fabs(R(2, 2)) >= std::max(std::fabs(R(0, 0)), std::fabs(R(1, 1))) && std::fabs(R(2, 2) + 1) > param)
+                compute_axis(2, 0, 1);
+        }
+        else
+        {
+            angle = std::acos(r);
+            double d = 1 / (2 * sin(angle));
+            axis[0] = d * (R(2, 1) - R(1, 2));
+            axis[1] = d * (R(0, 2) - R(2, 0));
+            axis[2] = d * (R(1, 0) - R(0, 1));
+        }
+        return true;
+    }
+    template <int _Dofs, typename pubDataType>
+    bool Controller<_Dofs, pubDataType>::AxisAngletoR(Eigen::Matrix3d &R, Eigen::Matrix<double, 3, 1> &axis, double &angle)
+    {
+        double x = axis[0];
+        double y = axis[1];
+        double z = axis[2];
+        R(0, 0) = x * x * (1 - std::cos(angle)) + std::cos(angle);
+        R(0, 1) = x * y * (1 - std::cos(angle)) - z * std::sin(angle);
+        R(0, 2) = x * z * (1 - std::cos(angle)) + y * std::sin(angle);
+
+        R(1, 0) = x * y * (1 - std::cos(angle)) + z * std::sin(angle);
+        R(1, 1) = y * y * (1 - std::cos(angle)) + std::cos(angle);
+        R(1, 2) = y * z * (1 - std::cos(angle)) - x * std::sin(angle);
+
+        R(2, 0) = x * z * (1 - std::cos(angle)) - y * std::sin(angle);
+        R(2, 1) = y * z * (1 - std::cos(angle)) + x * std::sin(angle);
+        R(2, 2) = z * z * (1 - std::cos(angle)) + std::cos(angle);
+        return true;
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::calCartesianRunQueue(my_robot::Robot<_Dofs> *robot)
+    {
+        double dddposLimit = robot->dddposLimit;
+        double ddposLimit = robot->ddposLimit;
+        double dposLimit = this->runSpeed * robot->dposLimit;
+        double dddoriLimit = robot->dddoriLimit;
+        double ddoriLimit = robot->ddoriLimit;
+        double doriLimit = this->runSpeed * robot->doriLimit;
+
+        Eigen::Matrix<double, 4, 1> jerkLimit(dddposLimit, dddposLimit, dddposLimit, dddoriLimit);
+        Eigen::Matrix<double, 4, 1> accLimit(ddposLimit, ddposLimit, ddposLimit, ddoriLimit);
+        Eigen::Matrix<double, 4, 1> velLimit(dposLimit, dposLimit, dposLimit, doriLimit);
+        Eigen::Matrix<double, 4, 1> pose = Eigen::Matrix<double, 4, 1>::Zero();
+        Eigen::Matrix<double, 4, 1> dpose = Eigen::Matrix<double, 4, 1>::Zero();
+        Eigen::Matrix<double, 4, 1> pose_calQueue;
+        pose.block(0, 0, 3, 1) = robot->getPosition();
+        pose_calQueue.block(0, 0, 3, 1) = x_calQueue.block(0, 0, 3, 1);
+        pose[3] = 0;
+        this->R1 = robot->getOrientation().toRotationMatrix();
+        Eigen::AngleAxisd Rx(Eigen::AngleAxisd(this->x_calQueue(3), Eigen::Vector3d::UnitX()));
+        Eigen::AngleAxisd Ry(Eigen::AngleAxisd(this->x_calQueue(4), Eigen::Vector3d::UnitY()));
+        Eigen::AngleAxisd Rz(Eigen::AngleAxisd(this->x_calQueue(5), Eigen::Vector3d::UnitZ()));
+        Eigen::Matrix3d R2;
+        R2 = Rx * Ry * Rz;
+        Eigen::Matrix3d dR = R1.transpose() * R2;
+        if (this->RtoAxisAngle(dR, this->rotationAxis, this->rotationAngle))
+            pose_calQueue[3] = this->rotationAngle;
+        else
+            pose_calQueue[3] = 0;
+        if (!this->taskPlanner->calPlanQueue(true, this->cycleTime, velLimit, accLimit, jerkLimit, pose, pose_calQueue, dpose,
+                                             this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue))
+        {
+            this->clearMotionQueue(this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue);
+            return;
+        }
+        if (!this->checkMotionQueue(this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue))
+            this->clearMotionQueue(this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue);
+        else
+            this->startMotion();
+    }
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::calCartesianStopQueue(my_robot::Robot<_Dofs> *robot)
+    {
+        double dddposLimit = robot->dddposLimit;
+        double ddposLimit = robot->ddposLimit;
+        double dddoriLimit = robot->dddoriLimit;
+        double ddoriLimit = robot->ddoriLimit;
+        Eigen::Matrix<double, 4, 1> maxJerk(dddposLimit, dddposLimit, dddposLimit, dddoriLimit);
+        Eigen::Matrix<double, 4, 1> maxAcc(ddposLimit, ddposLimit, ddposLimit, ddoriLimit);
+        Eigen::Matrix<double, 4, 1> x = Eigen::Matrix<double, 4, 1>::Zero();
+        Eigen::Matrix<double, 4, 1> dx = Eigen::Matrix<double, 4, 1>::Zero();
+        Eigen::Matrix<double, 4, 1> ddx = Eigen::Matrix<double, 4, 1>::Zero();
+        for (int i = 0; i < 3; i++)
+        {
+            x[i] = this->x_dRunQueue[i].front();
+            dx[i] = this->dx_dRunQueue[i].front();
+            ddx[i] = this->ddx_dRunQueue[i].front();
+        }
+        if (!calStopPlan<4>(true, this->cycleTime, maxJerk, maxAcc, x, dx, ddx, this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue))
+        {
+            this->clearMotionQueue(this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue);
+            return;
+        }
+
+        if (!this->checkMotionQueue(this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue))
+            this->clearMotionQueue(this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue);
+        else
+        {
+            this->clearMotionQueue(this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue);
             this->stopMotion();
         }
     }
@@ -318,6 +459,12 @@ namespace robot_controller
             Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
             TO2EE(jogNum - 1, 3) = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
             std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
+            if (IKresult[0] == NAN || IKresult[1] == NAN || IKresult[2] == NAN ||
+                IKresult[3] == NAN || IKresult[4] == NAN || IKresult[5] == NAN)
+            {
+                this->HandleiKFailed();
+                return;
+            }
             this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
@@ -372,6 +519,12 @@ namespace robot_controller
             Eigen::Matrix<double, 4, 4> TO2EE = robot->getT().matrix();
             TO2EE(jogNum - 1, 3) = this->controllerLaw->x_d[jogNum - 1]; // x y z 12 13 14
             std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
+            if (IKresult[0] == NAN || IKresult[1] == NAN || IKresult[2] == NAN ||
+                IKresult[3] == NAN || IKresult[4] == NAN || IKresult[5] == NAN)
+            {
+                this->HandleiKFailed();
+                return;
+            }
             this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
@@ -404,7 +557,14 @@ namespace robot_controller
             this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
         }
     }
-
+    template <int _Dofs, typename pubDataType>
+    void Controller<_Dofs, pubDataType>::HandleiKFailed()
+    {
+        std::cout << "[robotController] 逆解失败，停止运动" << std::endl;
+        clearMotionQueue(this->x_dRunQueue, this->dx_dRunQueue, this->ddx_dRunQueue);
+        clearMotionQueue(this->x_dStopQueue, this->dx_dStopQueue, this->ddx_dStopQueue);
+        this->nowControllerStatus = RunStatus::wait_;
+    }
     //******************************************************************init******************************************************************//
     // init
     template <int _Dofs, typename pubDataType>
@@ -497,6 +657,14 @@ namespace robot_controller
             {
                 this->q_calQueue[i] = this->controllerCommandBUff->q_final[i] * M_PI / 180.0;
             }
+            for (int i = 0; i < 3; i++)
+            {
+                this->x_calQueue[i] = this->controllerCommandBUff->x_final[i];
+            }
+            for (int i = 3; i < 6; i++)
+            {
+                this->x_calQueue[i] = this->controllerCommandBUff->x_final[i] * M_PI / 180.0;
+            }
             this->controllerCommandBUff->runSign = false;
             this->newPlan = true;
         }
@@ -542,11 +710,17 @@ namespace robot_controller
         // run stop
         if (this->newPlan && this->nowControllerStatus == RunStatus::wait_) // 新的规划
         {
-            this->calRunQueue(robot);
+            if (this->runTaskSpace == TaskSpace::jointSpace)
+                this->calJointRunQueue(robot);
+            else
+                this->calCartesianRunQueue(robot);
         }
         if (this->newStop && this->nowControllerStatus == RunStatus::run_) // 新的急停规划
         {
-            this->calStopQueue(robot);
+            if (this->runTaskSpace == TaskSpace::jointSpace)
+                this->calJointStopQueue(robot);
+            else
+                this->calCartesianStopQueue(robot);
         }
         this->newPlan = false;
         this->newStop = false;
@@ -579,24 +753,86 @@ namespace robot_controller
             this->controllerLaw->calWaitDesireNext();
             break;
         case RunStatus::run_:
-            if (q_dRunQueue[0].empty())
+            if ((q_dRunQueue[0].empty() && this->runTaskSpace == TaskSpace::jointSpace) ||
+                (x_dRunQueue[0].empty() && this->runTaskSpace == TaskSpace::cartesianSpace))
             {
                 if (this->runTaskSpace == TaskSpace::jointSpace)
                     updateX_d();
                 this->nowControllerStatus = RunStatus::wait_;
                 break;
             }
-            this->controllerLaw->calRunStopDesireNext(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
+            if (this->runTaskSpace == TaskSpace::cartesianSpace)
+            {
+                Eigen::Matrix<double, 4, 4> TO2EE;
+                Eigen::Matrix3d dR;
+                this->AxisAngletoR(dR, this->rotationAxis, this->x_dRunQueue[3].front());
+                this->x_dRunQueue[3].pop();
+                TO2EE.block(0, 0, 3, 3) = this->R1 * dR;
+                for (size_t i = 0; i < 4; i++)
+                {
+                    this->dx_dRunQueue[i].pop();
+                    this->ddx_dRunQueue[i].pop();
+                    if (i == 3)
+                        break;
+                    TO2EE(i, 3) = this->x_dRunQueue[i].front(); // x y z 12 13 14
+                    this->x_dRunQueue[i].pop();
+                }
+                std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
+                if (IKresult[0] == NAN || IKresult[1] == NAN || IKresult[2] == NAN ||
+                    IKresult[3] == NAN || IKresult[4] == NAN || IKresult[5] == NAN)
+                {
+                    this->HandleiKFailed();
+                    return;
+                }
+                this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+                this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+                this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
+            }
+            else
+            {
+                this->controllerLaw->calRunStopDesireNext(this->q_dRunQueue, this->dq_dRunQueue, this->ddq_dRunQueue);
+            }
             break;
         case RunStatus::stop_:
-            if (q_dStopQueue[0].empty())
+            if ((q_dStopQueue[0].empty() && this->runTaskSpace == TaskSpace::jointSpace) ||
+                (x_dStopQueue[0].empty() && this->runTaskSpace == TaskSpace::cartesianSpace))
             {
                 if (this->runTaskSpace == TaskSpace::jointSpace)
                     updateX_d();
                 this->nowControllerStatus = RunStatus::wait_;
                 break;
             }
-            this->controllerLaw->calRunStopDesireNext(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue);
+            if (this->runTaskSpace == TaskSpace::cartesianSpace)
+            {
+                Eigen::Matrix<double, 4, 4> TO2EE;
+                Eigen::Matrix3d dR;
+                this->AxisAngletoR(dR, this->rotationAxis, this->x_dStopQueue[3].front());
+                this->x_dStopQueue[3].pop();
+                TO2EE.block(0, 0, 3, 3) = this->R1 * dR;
+                for (size_t i = 0; i < 4; i++)
+                {
+                    this->dx_dStopQueue[i].pop();
+                    this->ddx_dStopQueue[i].pop();
+                    if (i == 3)
+                        break;
+                    TO2EE(i, 3) = this->x_dStopQueue[i].front(); // x y z 12 13 14
+                    this->x_dStopQueue[i].pop();
+                }
+                std::array<double, 7> IKresult = franka_IK_EE_CC(TO2EE, robot->getq()[6], robot->getqArray());
+                if (IKresult[0] == NAN || IKresult[1] == NAN || IKresult[2] == NAN ||
+                    IKresult[3] == NAN || IKresult[4] == NAN || IKresult[5] == NAN)
+                {
+                    this->HandleiKFailed();
+                    return;
+                }
+                this->controllerLaw->ddq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+                this->controllerLaw->dq_d = Eigen::Matrix<double, _Dofs, 1>::Zero();
+                this->controllerLaw->q_d = Eigen::Map<Eigen::Matrix<double, 7, 1>>(IKresult.data());
+            }
+            else
+            {
+                this->controllerLaw->calRunStopDesireNext(this->q_dStopQueue, this->dq_dStopQueue, this->ddq_dStopQueue);
+            }
             break;
         case RunStatus::jog_:
             if (this->runTaskSpace == TaskSpace::jointSpace)
@@ -659,7 +895,7 @@ namespace robot_controller
         static const char *n = "\n";
         // std::array<double, 7> tmp;
         // tmp = franka_IK_EE_CC(robot->getT02EEArray(), robot->getq()[6], robot->getqArray());
-        this->myfile << "time: " << this->time << "_" << n;
+        // this->myfile << "time: " << this->time << "_" << n;
         // this->myfile << "q: " << robot->getq().transpose() << "\n";
         // this->myfile << "tmp: " << tmp[0] << "  " << tmp[1] << "  " << tmp[2] << "  " << tmp[3]
         //              << " " << tmp[4] << "  " << tmp[5] << "  " << tmp[6] << "\n";
@@ -673,7 +909,7 @@ namespace robot_controller
         // this->myfile << "Orientation0: " << robot->getOrientation0().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
         // this->myfile << "this->controllerLaw->x_d: " << this->controllerLaw->x_d.transpose() << "\n";
         // this->myfile << "Position: " << robot->getPosition().transpose() << "\n";
-        this->myfile << "Orientation: " << robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
+        // this->myfile << "Orientation: " << robot->getOrientation().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
         // this->myfile << "orientation_hold: " << this->orientation_hold.toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";
         // this->myfile << "Position: " << robot->getdPosition().transpose() << "\n";
         // this->myfile << "Orientation: " << robot->getdOrientation().toRotationMatrix().eulerAngles(0, 1, 2).transpose() << "\n";

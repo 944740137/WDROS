@@ -151,9 +151,12 @@ bool calStopPlanParam(double deltaT, double jerk, double dq0, double ddq0,
 
     double T1 = std::fabs((maxAcc - ddq0) / (jerk1));
     double T2 = std::fabs(S2 / maxAcc);
+    if (maxAcc == 0)
+        T2 = 0;
     double T3 = std::fabs((0 - maxAcc) / (jerk2));
 
     planTime = T1 + T2 + T3;
+
     return true;
 }
 // 急停规划：固定时间规划
@@ -197,10 +200,11 @@ bool calStopPlanQueue(double deltaT, double q0, double dq0, double ddq0, double 
 
     double T1 = std::fabs((Acc - ddq0) / jerk1);
     double T2 = std::fabs(S2 / Acc);
+    if (Acc == 0)
+        T2 = maxPlanTime;
     double T3 = std::fabs((0 - Acc) / jerk2);
     double q = q0;
     int totalNum = std::ceil((T1 + T2 + T3) / deltaT);
-
     for (int num = 0; num <= totalNum; ++num)
     {
         double t = num * deltaT;
@@ -265,6 +269,7 @@ bool calStopPlan(bool isCoordinated, double deltaT, Eigen::Matrix<double, _Dofs,
         }
         if (i == 0 || maxPlanTime < planTime)
             maxPlanTime = planTime;
+        std::cout << "planTime: " << planTime << std::endl;
     }
     for (int i = 0; i < _Dofs; i++)
     {
