@@ -892,7 +892,7 @@ namespace robot_controller
         }
         if (time % recordPeriod != 0)
             return;
-        static const char *n = "\n";
+        // static const char *n = "\n";
         // std::array<double, 7> tmp;
         // tmp = franka_IK_EE_CC(robot->getT02EEArray(), robot->getq()[6], robot->getqArray());
         // this->myfile << "time: " << this->time << "_" << n;
